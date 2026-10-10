@@ -28,11 +28,53 @@ internal fun runApp(exitProcessOnExit: Boolean) {
         val settings by Stores.settings.state.collectAsState()
         val windowState = rememberWindowState(size = DpSize(1280.dp, 820.dp))
         var previousPlacement by remember { mutableStateOf(WindowPlacement.Floating) }
-        val fullscreen = windowState.placement == WindowPlacement.Fullscreen
+        // Restoring bounds needs the outer rectangle: a request made while the window is still undecorated
+        // is treated as the client area and the window manager then adds its title bar height on top.
+        var previousBounds by remember { mutableStateOf<java.awt.Rectangle?>(null) }
+        var previousInsets by remember { mutableStateOf<java.awt.Insets?>(null) }
+        var awtWindow by remember { mutableStateOf<androidx.compose.ui.awt.ComposeWindow?>(null) }
+        // Keyed separately from `fullscreen`: the resize Compose fires while leaving fullscreen would otherwise
+        // cancel the restore loop that is still waiting for the window manager to decorate the window again.
+        var restoreTo by remember { mutableStateOf<Pair<WindowPlacement, java.awt.Rectangle?>?>(null) }
+        var restoreRequest by remember { mutableStateOf(0) }
+        // Native resize feedback is not a user request and must not change the player or keyboard toggle intent.
+        var fullscreen by remember { mutableStateOf(false) }
         fun setFullscreen(enabled: Boolean) {
-            if (enabled == (windowState.placement == WindowPlacement.Fullscreen)) return
-            if (enabled) previousPlacement = windowState.placement
-            windowState.placement = if (enabled) WindowPlacement.Fullscreen else previousPlacement
+            if (enabled == fullscreen) return
+            val w = awtWindow
+            fullscreen = enabled
+            restoreRequest++
+            if (enabled) {
+                val pending = restoreTo
+                if (pending != null) {
+                    previousPlacement = pending.first
+                    previousBounds = pending.second
+                } else {
+                    previousPlacement = windowState.placement
+                    previousBounds = w?.bounds?.takeIf { previousPlacement == WindowPlacement.Floating }
+                    val ins = w?.insets
+                    if (ins != null && ins.top > 0) previousInsets = ins
+                }
+                restoreTo = null
+                // Set native placement before state so a queued resize cannot mirror the old placement back.
+                if (w != null) {
+                    if (w.placement == WindowPlacement.Maximized) w.placement = WindowPlacement.Floating
+                    w.placement = WindowPlacement.Fullscreen
+                }
+                windowState.placement = WindowPlacement.Fullscreen
+            } else {
+                // Leave native fullscreen first: Compose mirrors native resizes back into the state, so a pending
+                // event would otherwise set the placement back to Fullscreen right after we asked it to leave.
+                if (w != null) {
+                    val dev = w.graphicsConfiguration.device
+                    if (dev.fullScreenWindow === w) dev.fullScreenWindow = null
+                    if (w.placement == WindowPlacement.Fullscreen) w.placement = WindowPlacement.Floating
+                    w.placement = previousPlacement
+                }
+                windowState.placement = previousPlacement
+                restoreTo = previousPlacement to previousBounds
+                previousBounds = null
+            }
         }
         val player by Player.state.collectAsState()
         val icon = painterResource("icon.png")
@@ -73,7 +115,7 @@ internal fun runApp(exitProcessOnExit: Boolean) {
             title = player.current?.let { "${it.title} • ${it.artistText} - Utaloom" } ?: "Utaloom",
             icon = icon,
             onPreviewKeyEvent = { e ->
-                val isFullscreen = windowState.placement == WindowPlacement.Fullscreen
+                val isFullscreen = fullscreen
                 when {
                     e.type == KeyEventType.KeyDown && e.key == Key.F11 && (Player.state.value.current != null || isFullscreen) -> {
                         setFullscreen(!isFullscreen)
@@ -88,7 +130,42 @@ internal fun runApp(exitProcessOnExit: Boolean) {
             },
         ) {
             window.minimumSize = java.awt.Dimension(900, 600)
+            // ponytail: Compose 1.12.1 restores before the WM re-adds decorations; remove this bounded settling loop
+            // when its native fullscreen transition preserves decorated bounds reliably.
+            LaunchedEffect(restoreRequest) {
+                val placement = restoreTo?.first ?: return@LaunchedEffect
+                val target = restoreTo?.second
+                val request = restoreRequest
+                var stable = 0
+                repeat(60) {
+                    // Check the live token too: re-entry can precede the recomposition cancelling this effect.
+                    if (request != restoreRequest) return@LaunchedEffect
+                    if (window.placement != placement) {
+                        if (window.placement == WindowPlacement.Fullscreen) window.placement = WindowPlacement.Floating
+                        window.placement = placement
+                    }
+                    windowState.placement = placement
+                    // Resize only once the WM has decorated the window again: while undecorated the requested size
+                    // means the client area and the title bar height still gets added on top.
+                    val i = window.insets
+                    val decorated = i.top > 0 || (previousInsets != null && i == previousInsets)
+                    if (decorated) {
+                        if (target == null || window.bounds == target) {
+                            if (++stable >= 4) {
+                                restoreTo = null
+                                return@LaunchedEffect
+                            }
+                        } else {
+                            stable = 0
+                            window.bounds = target
+                        }
+                    } else stable = 0
+                    kotlinx.coroutines.delay(50)
+                }
+                if (request == restoreRequest) restoreTo = null
+            }
             SideEffect {
+                awtWindow = window
                 // ponytail: Compose 1.12.1 doesn't clear fullscreen on maximize; remove when its native transition is fixed.
                 if (windowState.placement == WindowPlacement.Maximized && window.placement == WindowPlacement.Fullscreen) {
                     window.placement = WindowPlacement.Floating

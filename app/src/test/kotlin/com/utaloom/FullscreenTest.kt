@@ -25,6 +25,7 @@ import kotlin.concurrent.thread
 /** Run under an isolated display and D-Bus session: dbus-run-session -- xvfb-run -a ./gradlew --no-daemon :app:test --tests com.utaloom.FullscreenTest. */
 class FullscreenTest {
     @Test
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     fun playerControlsAndKeyboardRestoreWindow() {
         assumeTrue("Needs a graphical display and VLC", !GraphicsEnvironment.isHeadless() && NativeLibs.discoverVlc() == null)
         val settings = Stores.settings.value
@@ -37,40 +38,97 @@ class FullscreenTest {
         try {
             await("Desktop window") { onEdt { Window.getWindows().filterIsInstance<ComposeWindow>().firstOrNull { it.isShowing }?.also { window = it } != null } }
             val w = checkNotNull(window)
+            onEdt { w.renderImmediately() }
+            Thread.sleep(500)
             val original = onEdt { w.bounds }
             val originalInsets = onEdt { w.insets }
             val originalDecoration = onEdt { w.isUndecorated }
+            val paused = Player.state.value
+            val artifacts = System.getenv("UTALOOM_WM_ARTIFACTS")?.let { java.io.File(it).also { dir -> dir.mkdirs() } }
+            fun capture(name: String) {
+                artifacts?.let { dir ->
+                    val shot = Robot().createScreenCapture(onEdt { w.graphicsConfiguration.bounds })
+                    javax.imageio.ImageIO.write(shot, "png", java.io.File(dir, "$name.png"))
+                }
+            }
+            fun fillsDisplay() = onEdt {
+                w.placement == WindowPlacement.Fullscreen && w.graphicsConfiguration.device.fullScreenWindow == w &&
+                    w.bounds == w.graphicsConfiguration.bounds && w.insets.top == 0 && w.insets.bottom == 0 &&
+                    find(w, "Exit full screen (Esc)") != null && find(w, "Settings") == null
+            }
+            capture("windowed")
             click(w, "Full screen (F11)")
-            await("Player fills the display") { onEdt { w.placement == WindowPlacement.Fullscreen && w.graphicsConfiguration.device.fullScreenWindow == w && w.bounds == w.graphicsConfiguration.bounds && find(w, "Exit full screen (Esc)") != null } }
+            await("Player fills the display without titlebar", condition = ::fillsDisplay)
+            onEdt { w.renderImmediately() }
+            Thread.sleep(2000)
+            check(Player.state.value == paused) { "Fullscreen must preserve paused playback and queue" }
+            capture("fullscreen")
+            println(onEdt { find(w, "Exit full screen (Esc)")?.accessibleComponent?.let { "Fullscreen exit control: ${it.locationOnScreen}, ${it.size}, visible=${it.isVisible}, showing=${it.isShowing}" } })
+            println("PASS: native player covers display, window titlebar insets removed, paused playback unchanged")
             click(w, "Exit full screen (Esc)")
-            await("Button restores floating window and decorations") { onEdt { w.placement == WindowPlacement.Floating && w.bounds == original && w.insets == originalInsets && w.isUndecorated == originalDecoration && w.graphicsConfiguration.device.fullScreenWindow != w } }
+            await("Button restores floating window and decorations", stableMillis = 300) { onEdt { w.placement == WindowPlacement.Floating && w.bounds == original && w.insets == originalInsets && w.isUndecorated == originalDecoration && w.graphicsConfiguration.device.fullScreenWindow != w } }
+            check(Player.state.value == paused) { "Exiting fullscreen must preserve paused playback and queue" }
+            capture("restored")
+            println("PASS: fullscreen button restores original window bounds and decorations")
             val robot = Robot()
             fun key(code: Int) {
-                onEdt { w.toFront(); w.requestFocus() }
+                onEdt { w.toFront(); w.focusTraversalPolicy.getDefaultComponent(w)?.requestFocusInWindow() }
                 val point = onEdt { w.locationOnScreen }
                 robot.mouseMove(point.x + 100, point.y + 100)
                 robot.mousePress(InputEvent.BUTTON1_DOWN_MASK)
                 robot.mouseRelease(InputEvent.BUTTON1_DOWN_MASK)
                 robot.waitForIdle()
-                await("Keyboard focus") { onEdt { w.isFocused && w.focusOwner != null } }
+                await("Keyboard focus") { onEdt { w.isFocused && w.focusOwner is java.awt.Canvas } }
                 robot.keyPress(code)
                 robot.keyRelease(code)
                 robot.waitForIdle()
             }
             key(KeyEvent.VK_F11)
-            await("F11 enters fullscreen") { onEdt { w.placement == WindowPlacement.Fullscreen } }
+            await("F11 enters fullscreen", condition = ::fillsDisplay)
             key(KeyEvent.VK_F11)
-            await("F11 exits fullscreen") { onEdt { w.placement == WindowPlacement.Floating && w.bounds == original } }
+            await("F11 exits fullscreen", stableMillis = 300) { onEdt { w.placement == WindowPlacement.Floating && w.bounds == original && w.insets == originalInsets } }
             key(KeyEvent.VK_F11)
-            await("Re-enter with F11") { onEdt { w.placement == WindowPlacement.Fullscreen } }
+            await("Re-enter with F11", condition = ::fillsDisplay)
             key(KeyEvent.VK_ESCAPE)
-            await("Escape restores floating window") { onEdt { w.placement == WindowPlacement.Floating && w.bounds == original } }
+            await("Escape restores floating window", stableMillis = 300) { onEdt { w.placement == WindowPlacement.Floating && w.bounds == original && w.insets == originalInsets } }
+            println("PASS: repeated F11 toggles and Escape restore window")
+            key(KeyEvent.VK_F11)
+            await("Enter for rapid toggle") { onEdt { w.placement == WindowPlacement.Fullscreen } }
+            key(KeyEvent.VK_ESCAPE)
+            await("Exit for rapid toggle") { onEdt { w.placement == WindowPlacement.Floating } }
+            key(KeyEvent.VK_F11)
+            await("Re-enter before restore finishes") { onEdt { w.placement == WindowPlacement.Fullscreen && w.bounds == w.graphicsConfiguration.bounds } }
+            key(KeyEvent.VK_ESCAPE)
+            await("Rapid toggle restores original bounds", stableMillis = 300) { onEdt { w.placement == WindowPlacement.Floating && w.bounds == original && w.insets == originalInsets } }
+            println("PASS: rapid re-entry cancels old restore without saving transient bounds")
             click(w, "Full screen (F11)")
-            await("Re-enter fullscreen") { onEdt { w.placement == WindowPlacement.Fullscreen } }
+            await("Re-enter fullscreen", condition = ::fillsDisplay)
             click(w, "Close player")
-            await("Close player exits fullscreen") { onEdt { w.placement == WindowPlacement.Floating && w.bounds == original } }
+            await("Close player exits fullscreen", stableMillis = 300) { onEdt { w.placement == WindowPlacement.Floating && w.bounds == original && w.insets == originalInsets } }
             await("Player overlay is closed") { onEdt { find(w, "Close player") == null } }
+            println("PASS: Close player removes overlay and leaves fullscreen")
+            if (java.awt.Toolkit.getDefaultToolkit().isFrameStateSupported(java.awt.Frame.MAXIMIZED_BOTH)) {
+                onEdt { w.placement = WindowPlacement.Maximized }
+                await("Maximized window", stableMillis = 300) { onEdt { w.placement == WindowPlacement.Maximized && w.width > original.width } }
+                val maximized = onEdt { w.bounds }
+                key(KeyEvent.VK_F11)
+                await("Fullscreen from maximized", condition = ::fillsDisplay)
+                key(KeyEvent.VK_ESCAPE)
+                await("Restore maximized placement", stableMillis = 300) { onEdt { w.placement == WindowPlacement.Maximized && w.insets == originalInsets && w.graphicsConfiguration.device.fullScreenWindow != w } }
+                key(KeyEvent.VK_F11)
+                await("Enter for maximized rapid toggle") { onEdt { w.placement == WindowPlacement.Fullscreen } }
+                key(KeyEvent.VK_ESCAPE)
+                await("Exit for maximized rapid toggle") { onEdt { w.placement == WindowPlacement.Maximized } }
+                key(KeyEvent.VK_F11)
+                await("Re-enter before maximized restore finishes") { onEdt { w.placement == WindowPlacement.Fullscreen } }
+                key(KeyEvent.VK_ESCAPE)
+                await("Rapid toggle restores maximized window", stableMillis = 300) { onEdt { w.placement == WindowPlacement.Maximized && w.insets == originalInsets } }
+                onEdt { w.placement = WindowPlacement.Floating }
+                await("Return to floating after maximized", stableMillis = 300) { onEdt { w.placement == WindowPlacement.Floating && w.insets == originalInsets } }
+                println("PASS: fullscreen and rapid re-entry restore maximized placement and decorations")
+            }
             onEdt { w.setSize(900, 600) }
+            await("Minimum window bounds settle", stableMillis = 300) { onEdt { w.width == 900 && w.height == 600 && w.insets == originalInsets } }
             await("Fullscreen button at minimum window size") {
                 onEdt {
                     find(w, "Full screen (F11)")?.accessibleComponent?.let {
@@ -84,13 +142,15 @@ class FullscreenTest {
             robot.mousePress(InputEvent.BUTTON1_DOWN_MASK)
             robot.mouseRelease(InputEvent.BUTTON1_DOWN_MASK)
             robot.waitForIdle()
-            await("Enter before stopping") { onEdt { w.placement == WindowPlacement.Fullscreen } }
+            await("Enter before stopping", condition = ::fillsDisplay)
+            println("PASS: fully onscreen fullscreen control accepts real mouse click at 900x600")
             Player.stop()
-            await("Stopping restores window") { onEdt { w.placement == WindowPlacement.Floating && w.bounds == small } }
+            await("Stopping restores window", stableMillis = 300) { onEdt { w.placement == WindowPlacement.Floating && w.bounds == small && w.insets == originalInsets } }
             key(KeyEvent.VK_F11)
             check(onEdt { w.placement == WindowPlacement.Floating }) { "No current song must not enter fullscreen" }
+            println("PASS: stopping exits fullscreen; no current song cannot enter it")
         } catch (e: Exception) {
-            println(onEdt { window?.let { "placement=${it.placement}, bounds=${it.bounds}, focused=${it.isFocused}, focusOwner=${it.focusOwner}" } })
+            println(onEdt { window?.let { "placement=${it.placement}, bounds=${it.bounds}, focused=${it.isFocused}, focusOwner=${it.focusOwner}, insets=${it.insets}, client=${clientSize(it)}" } })
             throw e
         } finally {
             window?.let { w -> onEdt { w.dispatchEvent(WindowEvent(w, WindowEvent.WINDOW_CLOSING)) } }
@@ -102,8 +162,14 @@ class FullscreenTest {
     }
 
     private fun click(window: ComposeWindow, name: String) {
-        await(name) { onEdt { find(window, name)?.accessibleAction?.doAccessibleAction(0) == true } }
+        await(name) { onEdt { find(window, name)?.accessibleAction != null } }
+        check(onEdt { find(window, name)?.accessibleAction?.doAccessibleAction(0) == true }) { "Click failed: $name" }
     }
+
+    private fun clientSize(w: ComposeWindow) = java.awt.Dimension(
+        w.bounds.width - w.insets.left - w.insets.right,
+        w.bounds.height - w.insets.top - w.insets.bottom,
+    )
 
     private fun find(node: Accessible, name: String): AccessibleContext? {
         val ctx = node.accessibleContext ?: return null
@@ -111,9 +177,14 @@ class FullscreenTest {
         return (0 until ctx.accessibleChildrenCount).firstNotNullOfOrNull { i -> ctx.getAccessibleChild(i)?.let { find(it, name) } }
     }
 
-    private fun await(label: String, condition: () -> Boolean) {
+    private fun await(label: String, stableMillis: Long = 0, condition: () -> Boolean) {
         val deadline = System.nanoTime() + 15_000_000_000L
-        while (!condition()) {
+        var since = 0L
+        while (true) {
+            if (condition()) {
+                if (since == 0L) since = System.nanoTime()
+                if (System.nanoTime() - since >= stableMillis * 1_000_000) return
+            } else since = 0L
             check(System.nanoTime() < deadline) { "Timed out: $label" }
             Thread.sleep(50)
         }

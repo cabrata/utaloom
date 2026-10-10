@@ -139,7 +139,7 @@ fun UtaloomApp(vlcError: String? = null, fullscreen: Boolean, onFullscreenChange
                         fullPlayer = true
                     }
                 }
-                Column(Modifier.fillMaxSize()) {
+                if (!fullscreen) Column(Modifier.fillMaxSize()) {
                     Row(Modifier.weight(1f)) {
                         if (!compact) Sidebar()
                         val contentModifier = if (compact) Modifier else Modifier.padding(top = 8.dp, end = 8.dp).clip(RoundedCornerShape(20.dp))
@@ -173,7 +173,7 @@ fun UtaloomApp(vlcError: String? = null, fullscreen: Boolean, onFullscreenChange
                     }
                     if (compact && !keyboardVisible) BottomNavigation()
                 }
-                AnimatedVisibility(showFullPlayer && player.current != null) {
+                if (showFullPlayer && player.current != null) {
                     FullPlayer(
                         onClose = { fullPlayer = false; onFullscreenChange(false) },
                         fullscreen = fullscreen,
