@@ -108,7 +108,7 @@ class FullscreenTest {
             println("PASS: Close player removes overlay and leaves fullscreen")
             if (java.awt.Toolkit.getDefaultToolkit().isFrameStateSupported(java.awt.Frame.MAXIMIZED_BOTH)) {
                 onEdt { w.placement = WindowPlacement.Maximized }
-                await("Maximized window", stableMillis = 300) { onEdt { w.placement == WindowPlacement.Maximized && w.width > original.width } }
+                await("Maximized window", stableMillis = 300) { onEdt { w.placement == WindowPlacement.Maximized && w.insets == originalInsets } }
                 val maximized = onEdt { w.bounds }
                 key(KeyEvent.VK_F11)
                 await("Fullscreen from maximized", condition = ::fillsDisplay)
