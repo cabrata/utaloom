@@ -1,5 +1,23 @@
 # Changelog
 
+## [v1.4.0] - 2026-10-11
+
+### Added
+- **desktop:** Add equalizer, crossfade, scrobbling, backups, lyrics, statistics, and desktop integrations (`341ee64`)
+- **audio:** Add native VLC pitch support and AudioEffects integration (`2ddb24c`)
+- **lyrics:** Add a free Google Translate provider (`0ba9134`)
+- **ci:** Automatically generate AI changelogs on push and release (`d5d1dfd`)
+
+### Changed
+- **lyrics:** Expand romanization to match the Android app (`08410a3`)
+- **changelog:** Generate release-specific changelogs from scratch (`f4e0f1f`)
+
+### Fixed
+- **audio:** Resolve Windows libvlccore loading issues and Compose warnings (`774a4e1`)
+- **changelog:** Unwrap placeholder links and deduplicate overlapping entries (`122cd5f`)
+- **ci:** Harden AI changelog generation against chatty model output (`56ff246`)
+- **ci:** Install VLC before running Ubuntu release tests (`2624bc2`)
+
 ## [v1.3.0] - 2026-10-11
 
 ### Added
