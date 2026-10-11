@@ -1,11 +1,40 @@
 package com.utaloom.data
 
+import com.utaloom.lyrics.Romanization
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
 import org.junit.Test
 
 class SettingsTest {
+    @Test
+    fun romanizeLanguageListDefaultsAndParsing() {
+        val supported = Romanization.SUPPORTED_LANGUAGES
+
+        // Blank preference enables every supported language (the default).
+        assertEquals(supported, Settings().lyricsRomanizeLanguages)
+
+        // Unknown entries are ignored and the canonical order is preserved.
+        val mixed = Settings(lyricsRomanizeList = "Korean:false,NotALanguage:true,Japanese:true")
+        assertEquals(supported - "Korean", mixed.lyricsRomanizeLanguages)
+
+        // A fully disabled list yields no languages, and garbage falls back to all.
+        assertEquals(emptyList<String>(), Settings(lyricsRomanizeList = supported.joinToString(",") { "$it:false" }).lyricsRomanizeLanguages)
+        assertEquals(supported, Settings(lyricsRomanizeList = "garbage").lyricsRomanizeLanguages)
+
+        // The new fields survive a JSON round-trip like the rest of the settings.
+        val original = Settings(
+            lyricsRomanize = true,
+            lyricsRomanizeList = "Japanese:true,Korean:false",
+            lyricsRomanizeAsMain = true,
+            lyricsRomanizeCyrillicByLine = true,
+        )
+        val parsed = Json.decodeFromString(Settings.serializer(), Json.encodeToString(Settings.serializer(), original))
+        assertEquals(original, parsed)
+        // Like Android, a language missing from the saved list stays enabled (default true).
+        assertEquals(supported - "Korean", parsed.lyricsRomanizeLanguages)
+    }
+
     @Test
     fun onlyExactLegacyDefaultIsMigrated() {
         val legacy = "wss://metrolist.caliph.dev/ws"

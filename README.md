@@ -27,6 +27,7 @@ Both platforms compile the same Utaloom UI, library, extraction, lyrics and List
 - Player with queue, shuffle, repeat, radio (endless autoplay), sleep timer, volume normalization
 - Native full-screen player that hides the window title bar and system taskbar. Use the full-screen button or F11, and Esc to exit
 - Synced lyrics with word-by-word (karaoke) highlighting. Providers: BetterLyrics, LrcLib, KuGou, Paxsenix, LyricsPlus (off by default), Zemer, YouTube subtitles, YouTube Music. They are tried in order with fallback, and you can reorder or toggle them in Settings → Lyrics providers
+- Offline lyrics romanization for Japanese (Romaji), Korean (Romaja), Chinese (Pinyin), Hindi, Punjabi and the Cyrillic-script languages (Russian, Ukrainian, Serbian, Bulgarian, Belarusian, Kyrgyz, Macedonian), with per-language toggles and an optional "romanization as main line" mode
 - Library: liked songs, history, local playlists, saved albums/artists/playlists
 - Optional YouTube account login (cookie) to see your own library and recommendations
 - Downloads for offline playback

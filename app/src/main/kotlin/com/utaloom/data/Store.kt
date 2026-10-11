@@ -111,6 +111,11 @@ data class Settings(
     val discordApplicationId: String = "",
     val lyricsRomanize: Boolean = false,
     val lyricsRomanizationLanguage: String = "auto", // auto | ja | ko | zh
+    // Per-language enable list, encoded like Android: "Japanese:true,Korean:false,...".
+    // Empty means every supported language is enabled (the default).
+    val lyricsRomanizeList: String = "",
+    val lyricsRomanizeAsMain: Boolean = false,
+    val lyricsRomanizeCyrillicByLine: Boolean = false,
     val lyricsTranslate: Boolean = false,
     val lyricsTargetLanguage: String = "ID",
     val lyricsTranslationKey: String = "",
@@ -125,6 +130,24 @@ data class Settings(
     /** Saved order first, then providers added in later versions. */
     val lyricsProviderOrder get() = lyricsOrder.filter { it in LyricsRepository.providers } + LyricsRepository.providers.filter { it !in lyricsOrder }
     val lyricsProviders get() = lyricsProviderOrder.filter { it !in lyricsDisabled }
+
+    /**
+     * Languages that should be romanized, mirroring the Android per-language checkboxes.
+     * A blank preference enables every supported language; unknown entries are ignored.
+     */
+    val lyricsRomanizeLanguages: List<String>
+        get() {
+            val supported = com.utaloom.lyrics.Romanization.SUPPORTED_LANGUAGES
+            if (lyricsRomanizeList.isBlank()) return supported
+            val saved = lyricsRomanizeList.split(",").mapNotNull { entry ->
+                val parts = entry.split(":")
+                if (parts.size != 2) return@mapNotNull null
+                val lang = parts[0].trim()
+                if (lang !in supported) null else lang to parts[1].trim().toBooleanStrictOrNull()
+            }.toMap()
+            // Preserve the canonical order so behaviour matches the Android list.
+            return supported.filter { saved[it] ?: true }
+        }
 }
 
 val defaultGlobalHotkeys = linkedMapOf(

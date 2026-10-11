@@ -539,11 +539,18 @@ fun LyricsPanel(modifier: Modifier = Modifier, compact: Boolean = false) {
         ly,
         settings.lyricsRomanize,
         settings.lyricsRomanizationLanguage,
+        settings.lyricsRomanizeList,
+        settings.lyricsRomanizeCyrillicByLine,
     ) {
         value = null
         if (!settings.lyricsRomanize) return@produceState
         value = try {
-            Romanization.romanizeSongLines(ly.lines.map { it.text }, settings.lyricsRomanizationLanguage)
+            Romanization.romanizeSongLines(
+                lines = ly.lines.map { it.text },
+                languageSelector = settings.lyricsRomanizationLanguage,
+                enabledLanguages = settings.lyricsRomanizeLanguages,
+                romanizeCyrillicByLine = settings.lyricsRomanizeCyrillicByLine,
+            )
         } catch (c: CancellationException) {
             throw c
         } catch (_: Exception) {
@@ -630,12 +637,15 @@ fun LyricsPanel(modifier: Modifier = Modifier, compact: Boolean = false) {
                 VScrollColumn(Modifier.fillMaxSize()) {
                     itemsIndexed(ly.lines) { i, line ->
                         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-                            Text(line.text, style = style.copy(fontWeight = FontWeight.Medium, fontSize = fontSize * 0.75f, lineHeight = fontSize))
                             val rom = romanizedLines?.getOrNull(i)
                             val trans = translatedLines?.getOrNull(i)
-                            if (!rom.isNullOrBlank()) {
+                            val romAsMain = settings.lyricsRomanizeAsMain && !rom.isNullOrBlank()
+                            val mainText = if (romAsMain) rom!! else line.text
+                            val subText = if (romAsMain) line.text else rom
+                            Text(mainText, style = style.copy(fontWeight = FontWeight.Medium, fontSize = fontSize * 0.75f, lineHeight = fontSize))
+                            if (!subText.isNullOrBlank()) {
                                 Spacer(Modifier.height(2.dp))
-                                Text(rom, style = style.copy(fontSize = fontSize * 0.55f, lineHeight = fontSize * 0.75f, fontWeight = FontWeight.Normal), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(subText, style = style.copy(fontSize = fontSize * 0.55f, lineHeight = fontSize * 0.75f, fontWeight = FontWeight.Normal), color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             if (!trans.isNullOrBlank()) {
                                 Spacer(Modifier.height(2.dp))
@@ -682,6 +692,7 @@ fun LyricsPanel(modifier: Modifier = Modifier, compact: Boolean = false) {
                                 sharp = hovered || compact,
                                 romanized = romanizedLines?.getOrNull(item.line),
                                 translated = translatedLines?.getOrNull(item.line),
+                                romanizeAsMain = settings.lyricsRomanizeAsMain,
                                 onClick = if (guest) null else ({ Player.seekTo(line.timeMs); if (!s.isPlaying) Player.play() }),
                             )
                         }
@@ -751,6 +762,7 @@ private fun LyricRow(
     sharp: Boolean,
     romanized: String? = null,
     translated: String? = null,
+    romanizeAsMain: Boolean = false,
     onClick: (() -> Unit)?,
 ) {
     val color = MaterialTheme.colorScheme.onSurface
@@ -765,6 +777,11 @@ private fun LyricRow(
         "v1000" -> Triple(Alignment.CenterHorizontally, TextAlign.Center, 0.5f)
         else -> Triple(Alignment.Start, TextAlign.Start, 0f)
     }
+    val romAvailable = !romanized.isNullOrBlank()
+    // Romanization as main swaps the primary/secondary lines; word karaoke only applies to the original.
+    val asMain = romanizeAsMain && romAvailable
+    val mainText = if (asMain) romanized!! else line.text
+    val subText = if (asMain) line.text else romanized
     Column(
         Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(12.dp))
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
@@ -775,18 +792,18 @@ private fun LyricRow(
         horizontalAlignment = align,
     ) {
         when {
-            active && line.words.isNotEmpty() -> {
+            active && !asMain && line.words.isNotEmpty() -> {
                 val gap = with(LocalDensity.current) { (style.fontSize * 0.26f).toDp() }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(gap, align)) {
                     for (w in lyricWordGroups(line.text, line.words)) KaraokeWord(w, pos, style, color)
                 }
             }
-            else -> Text(line.text, style = style, color = color, textAlign = textAlign)
+            else -> Text(mainText, style = style, color = color, textAlign = textAlign)
         }
-        if (!romanized.isNullOrBlank()) {
+        if (!subText.isNullOrBlank()) {
             Spacer(Modifier.height(3.dp))
             Text(
-                romanized,
+                subText,
                 style = style.copy(fontSize = style.fontSize * 0.65f, lineHeight = style.lineHeight * 0.65f, fontWeight = FontWeight.Normal),
                 color = color.copy(alpha = if (active) 0.80f else 0.60f),
                 textAlign = textAlign,

@@ -32,7 +32,8 @@ object Backup {
         "ltAutoApproveJoins", "ltAutoApproveSuggestions", "ltSyncVolume", "lyricsOrder", "lyricsDisabled", "lyricsTextSize", "minimizeToTray",
         "equalizerEnabled", "equalizerPreset", "equalizerPreamp", "equalizerBands", "crossfadeSeconds", "gaplessPlayback", "skipSilence",
         "playbackSpeed", "playbackPitch", "lastFmEnabled", "listenBrainzEnabled", "discordEnabled",
-        "lyricsRomanize", "lyricsRomanizationLanguage", "lyricsTranslateLanguage", "lyricsTranslationProvider",
+        "lyricsRomanize", "lyricsRomanizationLanguage", "lyricsRomanizeList", "lyricsRomanizeAsMain", "lyricsRomanizeCyrillicByLine",
+        "lyricsTranslateLanguage", "lyricsTranslationProvider",
         "miniPlayerAlwaysOnTop", "globalHotkeysEnabled", "globalHotkeys",
     )
 
@@ -223,6 +224,13 @@ object Backup {
             require(TranslationProvider.entries.any { it.id == id }) { "Invalid lyrics translation provider" }
         }
         listOf("equalizerPreset", "lyricsRomanizationLanguage", "lyricsTranslateLanguage").forEach { key -> prefs[key]?.let { text(it.jsonPrimitive.content, 100, key) } }
+        prefs["lyricsRomanizeList"]?.let { value ->
+            val raw = value.jsonPrimitive.content
+            require(raw.length <= 1000 && (raw.isBlank() || raw.split(",").all { entry ->
+                val parts = entry.split(":")
+                parts.size == 2 && parts[0] in com.utaloom.lyrics.Romanization.SUPPORTED_LANGUAGES && parts[1].trim().toBooleanStrictOrNull() != null
+            })) { "Invalid lyrics romanization languages" }
+        }
         prefs["globalHotkeys"]?.let { value ->
             require(value.jsonObject.size <= 32) { "Too many global hotkeys" }
             value.jsonObject.forEach { (key, binding) -> text(key, 100, "hotkey action"); text(binding.jsonPrimitive.content, 100, "hotkey binding") }

@@ -36,6 +36,10 @@ class BackupTest {
             darkMode = "dark",
             volume = 75,
             hideExplicit = true,
+            lyricsRomanize = true,
+            lyricsRomanizeList = "Japanese:true,Korean:false",
+            lyricsRomanizeAsMain = true,
+            lyricsRomanizeCyrillicByLine = true,
         )
         val queue = PersistedQueue(songs = listOf(testSong), index = 0, positionMs = 5000, title = "Queue Title")
 
@@ -61,6 +65,9 @@ class BackupTest {
         // Safe settings preserved, unsafe excluded
         assertEquals(JsonPrimitive("dark"), decoded.settings["darkMode"])
         assertEquals(JsonPrimitive(75), decoded.settings["volume"])
+        assertEquals(JsonPrimitive("Japanese:true,Korean:false"), decoded.settings["lyricsRomanizeList"])
+        assertEquals(JsonPrimitive(true), decoded.settings["lyricsRomanizeAsMain"])
+        assertEquals(JsonPrimitive(true), decoded.settings["lyricsRomanizeCyrillicByLine"])
         assertNull(decoded.settings["cookie"])
         assertNull(decoded.settings["visitorData"])
         assertNull(decoded.settings["proxy"])

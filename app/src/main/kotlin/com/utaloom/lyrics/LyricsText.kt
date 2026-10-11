@@ -1,22 +1,26 @@
 package com.utaloom.lyrics
 
 /**
- * Unified lyrics text processor connecting offline romanization (Kuromoji, TinyPinyin, Hangul)
- * and opt-in lyric translation (official DeepL API or free Google Translate).
+ * Unified lyrics text processor connecting offline romanization (Kuromoji, TinyPinyin, Hangul,
+ * Devanagari, Gurmukhi and Cyrillic romanization) and opt-in lyric translation (official DeepL
+ * API or free Google Translate).
  */
 object LyricsText {
-    fun isJapanese(text: String): Boolean = text.any {
-        (it in '\u3040'..'\u309F') || (it in '\u30A0'..'\u30FF') || (it in '\u4E00'..'\u9FFF')
-    }
+    /** Languages that can be romanized offline, mirroring the Android app. */
+    val SUPPORTED_LANGUAGES: List<String> get() = Romanization.SUPPORTED_LANGUAGES
 
-    fun isKorean(text: String): Boolean = text.any { it in '\uAC00'..'\uD7A3' }
+    /** Languages enabled by default (all of them). */
+    val DEFAULT_ENABLED_LANGUAGES: List<String> get() = Romanization.DEFAULT_ENABLED_LANGUAGES
 
-    fun isChinese(text: String): Boolean {
-        if (text.isEmpty()) return false
-        val cjkCount = text.count { it in '\u4E00'..'\u9FFF' }
-        val kanaCount = text.count { (it in '\u3040'..'\u309F') || (it in '\u30A0'..'\u30FF') }
-        return cjkCount > 0 && (kanaCount.toDouble() / text.length.toDouble()) < 0.1
-    }
+    fun isJapanese(text: String): Boolean = Romanization.isJapanese(text)
+
+    fun isKorean(text: String): Boolean = Romanization.isKorean(text)
+
+    fun isChinese(text: String): Boolean = Romanization.isChinese(text)
+
+    fun isHindi(text: String): Boolean = Romanization.isHindi(text)
+
+    fun isPunjabi(text: String): Boolean = Romanization.isPunjabi(text)
 
     suspend fun romanizeJapanese(text: String): String = Romanization.romanizeJapanese(text)
 
@@ -24,8 +28,29 @@ object LyricsText {
 
     suspend fun romanizeChinese(text: String): String = Romanization.romanizeChinese(text)
 
-    suspend fun romanizeSongLines(lines: List<String>, languageSelector: String = "auto"): List<String?> =
-        Romanization.romanizeSongLines(lines, languageSelector) ?: lines.map { null }
+    suspend fun romanizeHindi(text: String): String = Romanization.romanizeHindi(text)
+
+    suspend fun romanizePunjabi(text: String): String = Romanization.romanizePunjabi(text)
+
+    /** Romanizes a Cyrillic line. Pass a language name to force it, or null to auto-detect. */
+    suspend fun romanizeCyrillic(text: String, language: String? = null): String? =
+        Romanization.romanizeCyrillic(text, language)
+
+    /** Romanizes a single line using the enabled languages, matching the Android dispatch order. */
+    suspend fun romanize(
+        text: String,
+        line: String,
+        enabledLanguages: List<String>,
+        romanizeCyrillicByLine: Boolean = false,
+    ): String? = Romanization.romanize(text, line, enabledLanguages, romanizeCyrillicByLine)
+
+    suspend fun romanizeSongLines(
+        lines: List<String>,
+        languageSelector: String = "auto",
+        enabledLanguages: List<String> = Romanization.DEFAULT_ENABLED_LANGUAGES,
+        romanizeCyrillicByLine: Boolean = false,
+    ): List<String?> =
+        Romanization.romanizeSongLines(lines, languageSelector, enabledLanguages, romanizeCyrillicByLine) ?: lines.map { null }
 
     suspend fun translateWithDeepL(
         lines: List<String>,
