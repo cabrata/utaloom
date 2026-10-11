@@ -2,7 +2,7 @@ package com.utaloom.lyrics
 
 /**
  * Unified lyrics text processor connecting offline romanization (Kuromoji, TinyPinyin, Hangul)
- * and official DeepL API lyric translation.
+ * and opt-in lyric translation (official DeepL API or free Google Translate).
  */
 object LyricsText {
     fun isJapanese(text: String): Boolean = text.any {
@@ -32,7 +32,23 @@ object LyricsText {
         targetLanguage: String,
         apiKey: String,
     ): Result<List<String?>> =
-        LyricsTranslation.translateLines(lines, targetLanguage, apiKey)
+        LyricsTranslation.translateLines(lines, targetLanguage, apiKey, TranslationProvider.DEEPL.id)
+
+    /** Free Google Translate path: no API key required. */
+    suspend fun translateWithGoogle(
+        lines: List<String>,
+        targetLanguage: String,
+    ): Result<List<String?>> =
+        LyricsTranslation.translateLines(lines, targetLanguage, "", TranslationProvider.GOOGLE.id)
+
+    /** Dispatches to the selected provider; Google ignores [apiKey]. */
+    suspend fun translateWithProvider(
+        lines: List<String>,
+        targetLanguage: String,
+        apiKey: String,
+        provider: String,
+    ): Result<List<String?>> =
+        LyricsTranslation.translateLines(lines, targetLanguage, apiKey, provider)
 
     fun clearCache() {
         LyricsTranslation.clearCache()

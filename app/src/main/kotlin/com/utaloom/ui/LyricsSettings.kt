@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import com.utaloom.data.Settings
 import com.utaloom.data.Stores
 import com.utaloom.lyrics.LyricsTranslation
+import com.utaloom.lyrics.TranslationProvider
 
 val Settings.deepLApiKey: String get() = lyricsTranslationKey
 val Settings.lyricsTranslateLanguage: String get() = lyricsTargetLanguage
@@ -171,11 +172,11 @@ fun LyricsSettings() {
         if (s.lyricsTranslate) {
             SettingsRow(
                 title = "Translation provider",
-                description = "Official translation provider (currently DeepL)",
+                description = "DeepL needs your own API key; Google Translate is free and needs no key",
             ) {
                 DropdownSelector(
                     selected = s.lyricsTranslationProvider,
-                    options = listOf("deepl" to "DeepL API (Official Free / Pro)"),
+                    options = TranslationProvider.entries.map { it.id to it.label },
                     onSelect = { prov ->
                         Stores.settings.update { it.copy(lyricsTranslationProvider = prov) }
                     },
@@ -184,7 +185,7 @@ fun LyricsSettings() {
 
             SettingsRow(
                 title = "Translation target language",
-                description = "Language used when requesting lyrics translation via DeepL",
+                description = "Language used when requesting lyrics translation",
             ) {
                 DropdownSelector(
                     selected = s.lyricsTargetLanguage,
@@ -195,32 +196,53 @@ fun LyricsSettings() {
                 )
             }
 
-            BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp)) {
-                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("DeepL API Key", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "Key ending with ':fx' automatically routes to api-free.deepl.com; otherwise api.deepl.com. Masked and stored locally.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    OutlinedTextField(
-                        value = s.lyricsTranslationKey,
-                        onValueChange = { key ->
-                            Stores.settings.update { it.copy(lyricsTranslationKey = key.trim()) }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
-                        singleLine = true,
-                        placeholder = { Text("Enter DeepL Auth Key") },
-                        trailingIcon = {
-                            IconButton({ showApiKey = !showApiKey }) {
-                                Icon(
-                                    if (showApiKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                    contentDescription = if (showApiKey) "Hide key" else "Show key",
-                                )
-                            }
-                        },
-                    )
+            if (TranslationProvider.fromId(s.lyricsTranslationProvider).requiresApiKey) {
+                BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp)) {
+                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("DeepL API Key", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Key ending with ':fx' automatically routes to api-free.deepl.com; otherwise api.deepl.com. Masked and stored locally.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        OutlinedTextField(
+                            value = s.lyricsTranslationKey,
+                            onValueChange = { key ->
+                                Stores.settings.update { it.copy(lyricsTranslationKey = key.trim()) }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
+                            singleLine = true,
+                            placeholder = { Text("Enter DeepL Auth Key") },
+                            trailingIcon = {
+                                IconButton({ showApiKey = !showApiKey }) {
+                                    Icon(
+                                        if (showApiKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                        contentDescription = if (showApiKey) "Hide key" else "Show key",
+                                    )
+                                }
+                            },
+                        )
+                    }
+                }
+            } else {
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp),
+                ) {
+                    Row(
+                        Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Icon(Icons.Default.Info, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                        Text(
+                            "Google Translate uses the public translate.googleapis.com endpoint. No API key is needed, but lyrics are sent to Google in plain text and the free endpoint has no uptime or quota guarantee.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
         }
@@ -237,7 +259,7 @@ fun LyricsSettings() {
             ) {
                 Icon(Icons.Default.Info, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                 Text(
-                    "Lyrics are translated strictly on demand when you click 'Translate' in the player lyrics view. Translation uses your personal DeepL account quota and is never sent automatically on startup.",
+                    "Lyrics are translated strictly on demand when you click 'Translate' in the player lyrics view. Translation is never sent automatically on startup. DeepL uses your personal quota; Google Translate is free but sends lyrics to Google's public endpoint.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

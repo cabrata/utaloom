@@ -107,6 +107,68 @@ class LyricsTextTest {
     }
 
     @Test
+    fun googleTranslateResponseParsingJoinsSegments() {
+        // Google splits a sentence into fragments; they must join without inserted separators.
+        val body = """[[["Langit ","Sky ",null,null,10],["biru","blue",null,null,3]],null,"en"]"""
+        assertEquals("Langit biru", GoogleTranslation.parseResponse(body))
+
+        // Newlines inside a single fragment are preserved for multi-line inputs.
+        assertEquals("Baris satu\nBaris dua", GoogleTranslation.parseResponse("""[[["Baris satu\nBaris dua","Line one\nLine two"]]]"""))
+
+        // Malformed or empty payloads degrade to an empty string rather than throwing.
+        assertEquals("", GoogleTranslation.parseResponse("not json"))
+        assertEquals("", GoogleTranslation.parseResponse("[[[]]]"))
+        assertEquals("", GoogleTranslation.parseResponse("[]"))
+    }
+
+    @Test
+    fun googleTranslateLanguageNormalization() {
+        assertEquals("id", GoogleTranslation.normalizeLanguage("ID"))
+        assertEquals("en", GoogleTranslation.normalizeLanguage("EN"))
+        assertEquals("en", GoogleTranslation.normalizeLanguage("en-US"))
+        assertEquals("zh-CN", GoogleTranslation.normalizeLanguage("ZH"))
+        assertEquals("zh-TW", GoogleTranslation.normalizeLanguage("zh-tw"))
+        assertEquals("pt-BR", GoogleTranslation.normalizeLanguage("PT-BR"))
+        assertEquals("pt-PT", GoogleTranslation.normalizeLanguage("pt"))
+        assertEquals("en", GoogleTranslation.normalizeLanguage("  "))
+    }
+
+    @Test
+    fun translationProviderSelectionAndKeyRequirement() {
+        assertEquals(TranslationProvider.GOOGLE, TranslationProvider.fromId("google"))
+        assertEquals(TranslationProvider.GOOGLE, TranslationProvider.fromId("  GOOGLE "))
+        assertEquals(TranslationProvider.DEEPL, TranslationProvider.fromId("deepl"))
+        // Unknown or blank ids fall back to DeepL instead of failing.
+        assertEquals(TranslationProvider.DEEPL, TranslationProvider.fromId(""))
+        assertEquals(TranslationProvider.DEEPL, TranslationProvider.fromId(null))
+
+        assertFalse(TranslationProvider.GOOGLE.requiresApiKey)
+        assertTrue(TranslationProvider.DEEPL.requiresApiKey)
+    }
+
+    @Test
+    fun googleProviderSucceedsWithoutApiKey() = runBlocking {
+        // Empty input must short-circuit before any network call, even without a key.
+        val result = LyricsTranslation.translateLines(
+            lines = emptyList(),
+            targetLang = "ID",
+            apiKey = "",
+            provider = TranslationProvider.GOOGLE.id,
+        )
+        assertTrue(result.isSuccess)
+        assertEquals(emptyList<String?>(), result.getOrNull())
+    }
+
+    @Test
+    fun translationCacheKeySeparatesProviders() {
+        val deepl = LyricsTranslation.computeCacheKey("deepl", "ID", "key", "Hello")
+        val google = LyricsTranslation.computeCacheKey("google", "ID", "free", "Hello")
+        assertTrue(deepl.startsWith("deepl:ID:"))
+        assertTrue(google.startsWith("google:ID:"))
+        assertTrue(deepl != google)
+    }
+
+    @Test
     fun missingApiKeyFailsSafelyWithoutSendingNetwork() = runBlocking {
         val result = LyricsText.translateWithDeepL(
             lines = listOf("Hello", "World"),

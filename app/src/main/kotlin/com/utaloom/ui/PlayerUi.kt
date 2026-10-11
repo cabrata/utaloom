@@ -74,6 +74,7 @@ import androidx.compose.material.icons.filled.PictureInPictureAlt
 import androidx.compose.material.icons.filled.PlayArrow
 import com.utaloom.lyrics.LyricsTranslation
 import com.utaloom.lyrics.Romanization
+import com.utaloom.lyrics.TranslationProvider
 import com.utaloom.lyrics.TranslationState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.rememberCoroutineScope
@@ -557,14 +558,23 @@ fun LyricsPanel(modifier: Modifier = Modifier, compact: Boolean = false) {
     var showTranslateConfirm by remember { mutableStateOf(false) }
     var localError by remember { mutableStateOf<String?>(null) }
 
+    val provider = remember(settings.lyricsTranslationProvider) {
+        TranslationProvider.fromId(settings.lyricsTranslationProvider)
+    }
+
     if (showTranslateConfirm) {
         AlertDialog(
             onDismissRequest = { showTranslateConfirm = false },
             title = { Text("Translate lyrics") },
             text = {
                 Text(
-                    "Send lyrics to DeepL to translate into ${settings.lyricsTargetLanguage}? " +
-                        "This will use your personal API key and translation quota.",
+                    if (provider == TranslationProvider.GOOGLE) {
+                        "Send lyrics to Google Translate to translate into ${settings.lyricsTargetLanguage}? " +
+                            "This is free and needs no API key, but the lyrics are sent to translate.googleapis.com."
+                    } else {
+                        "Send lyrics to DeepL to translate into ${settings.lyricsTargetLanguage}? " +
+                            "This will use your personal API key and translation quota."
+                    },
                 )
             },
             confirmButton = {
@@ -577,6 +587,7 @@ fun LyricsPanel(modifier: Modifier = Modifier, compact: Boolean = false) {
                         targetLang = settings.lyricsTargetLanguage,
                         apiKey = settings.lyricsTranslationKey,
                         scope = scope,
+                        provider = provider.id,
                     )
                 }) {
                     Text("Translate")
@@ -697,8 +708,8 @@ fun LyricsPanel(modifier: Modifier = Modifier, compact: Boolean = false) {
                     }
                 } else {
                     TextButton(onClick = {
-                        if (settings.lyricsTranslationKey.isBlank()) {
-                            localError = "Please enter your DeepL API key in Settings > Lyrics first."
+                        if (provider.requiresApiKey && settings.lyricsTranslationKey.isBlank()) {
+                            localError = "Please enter your DeepL API key in Settings > Lyrics first, or switch the provider to Google Translate (free)."
                         } else {
                             showTranslateConfirm = true
                         }

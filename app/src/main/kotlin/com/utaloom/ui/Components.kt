@@ -58,6 +58,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
@@ -350,7 +351,7 @@ fun SongRow(
         if (showThumb) Box {
             Thumb(song.thumbnail, 48.dp)
             if (playing) Box(Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.45f)), contentAlignment = Alignment.Center) {
-                Icon(Icons.Default.VolumeUp, null, tint = androidx.compose.ui.graphics.Color.White)
+                Icon(Icons.AutoMirrored.Filled.VolumeUp, null, tint = androidx.compose.ui.graphics.Color.White)
             }
         }
         Column(Modifier.weight(1f)) {

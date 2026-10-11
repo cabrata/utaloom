@@ -23,6 +23,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.coroutines.coroutineContext
 
 @Serializable
 data class DeepLTranslationRequest(
@@ -50,9 +51,21 @@ sealed interface TranslationState {
     data class Error(val songId: String, val message: String) : TranslationState
 }
 
+/** Translation backends supported by the lyrics view. */
+enum class TranslationProvider(val id: String, val label: String, val requiresApiKey: Boolean) {
+    DEEPL("deepl", "DeepL API (Official Free / Pro)", true),
+    GOOGLE("google", "Google Translate (Free, no key)", false);
+
+    companion object {
+        fun fromId(id: String?): TranslationProvider =
+            entries.firstOrNull { it.id.equals(id?.trim(), ignoreCase = true) } ?: DEEPL
+    }
+}
+
 /**
- * Minimal official DeepL translation service with line mapping preservation,
- * response count enforcement, caching, and explicit opt-in execution.
+ * Opt-in lyric translation with line mapping preservation, response count enforcement,
+ * caching, and explicit opt-in execution. Backed by DeepL (API key) or the free
+ * Google Translate endpoint.
  */
 object LyricsTranslation {
     private val client by lazy {
@@ -126,14 +139,21 @@ object LyricsTranslation {
     }
 
     /**
-     * Executes DeepL translation for a list of lyric lines, preserving line positions
+     * Executes translation for a list of lyric lines, preserving line positions
      * and strictly enforcing response line counts before returning.
+     * The free Google provider ignores [apiKey] and never requires one.
      */
     suspend fun translateLines(
         lines: List<String>,
         targetLang: String,
         apiKey: String,
+        provider: String = TranslationProvider.DEEPL.id,
     ): Result<List<String?>> = withContext(Dispatchers.IO) {
+        val selected = TranslationProvider.fromId(provider)
+        if (selected == TranslationProvider.GOOGLE) {
+            return@withContext translateWithGoogle(lines, targetLang)
+        }
+
         val trimmedKey = apiKey.trim()
         if (trimmedKey.isEmpty()) {
             return@withContext Result.failure(IllegalArgumentException("DeepL API key is required"))
@@ -210,6 +230,36 @@ object LyricsTranslation {
     }
 
     /**
+     * Free Google Translate path: per-line requests, line positions preserved, cached by provider.
+     */
+    private suspend fun translateWithGoogle(lines: List<String>, targetLang: String): Result<List<String?>> = withContext(Dispatchers.IO) {
+        if (lines.isEmpty()) return@withContext Result.success(emptyList<String?>())
+
+        val fullText = lines.joinToString("\n")
+        val cacheKey = computeCacheKey(TranslationProvider.GOOGLE.id, targetLang, "free", fullText)
+        memoryCache[cacheKey]?.let { return@withContext Result.success(it) }
+
+        return@withContext try {
+            coroutineContext.ensureActive()
+            val translated = GoogleTranslation.translateLines(lines, targetLang)
+            coroutineContext.ensureActive()
+            if (translated.size != lines.size) {
+                return@withContext Result.failure(
+                    IllegalStateException(
+                        "Translation response count mismatch: expected ${lines.size}, received ${translated.size}"
+                    )
+                )
+            }
+            memoryCache[cacheKey] = translated
+            Result.success(translated)
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
      * Triggers translation in response to an explicit user click.
      * Honors cancellation and surfaces errors.
      */
@@ -219,12 +269,13 @@ object LyricsTranslation {
         targetLang: String,
         apiKey: String,
         scope: CoroutineScope,
+        provider: String = TranslationProvider.DEEPL.id,
     ) {
         cancel()
         _state.value = TranslationState.Translating(songId)
 
         activeJob = scope.launch {
-            val result = translateLines(lines, targetLang, apiKey)
+            val result = translateLines(lines, targetLang, apiKey, provider)
             result.fold(
                 onSuccess = { translated ->
                     _state.value = TranslationState.Success(songId, targetLang, translated)

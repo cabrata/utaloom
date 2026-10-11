@@ -1,5 +1,6 @@
 package com.utaloom.data
 
+import com.utaloom.lyrics.TranslationProvider
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.*
 import java.io.File
@@ -31,7 +32,7 @@ object Backup {
         "ltAutoApproveJoins", "ltAutoApproveSuggestions", "ltSyncVolume", "lyricsOrder", "lyricsDisabled", "lyricsTextSize", "minimizeToTray",
         "equalizerEnabled", "equalizerPreset", "equalizerPreamp", "equalizerBands", "crossfadeSeconds", "gaplessPlayback", "skipSilence",
         "playbackSpeed", "playbackPitch", "lastFmEnabled", "listenBrainzEnabled", "discordEnabled",
-        "lyricsRomanize", "lyricsRomanizationLanguage", "lyricsTranslateLanguage",
+        "lyricsRomanize", "lyricsRomanizationLanguage", "lyricsTranslateLanguage", "lyricsTranslationProvider",
         "miniPlayerAlwaysOnTop", "globalHotkeysEnabled", "globalHotkeys",
     )
 
@@ -217,6 +218,10 @@ object Backup {
         number("playbackSpeed", 0.25..4.0)
         number("playbackPitch", -12.0..12.0)
         prefs["equalizerBands"]?.let { value -> require(value.jsonArray.size == 10 && value.jsonArray.all { it.jsonPrimitive.doubleOrNull?.let { n -> n.isFinite() && n in -20.0..20.0 } == true }) { "Invalid equalizer bands" } }
+        prefs["lyricsTranslationProvider"]?.let { value ->
+            val id = value.jsonPrimitive.content
+            require(TranslationProvider.entries.any { it.id == id }) { "Invalid lyrics translation provider" }
+        }
         listOf("equalizerPreset", "lyricsRomanizationLanguage", "lyricsTranslateLanguage").forEach { key -> prefs[key]?.let { text(it.jsonPrimitive.content, 100, key) } }
         prefs["globalHotkeys"]?.let { value ->
             require(value.jsonObject.size <= 32) { "Too many global hotkeys" }
