@@ -47,7 +47,15 @@ jobs:
           }
       - name: Test
         shell: bash
+        env:
+          UTALOOM_WM_ARTIFACTS: ${{ github.workspace }}/app/build/acceptance/fullscreen
         run: bash ./gradlew :shared:jvmTest :app:test :app:playerSmoke --no-daemon
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fullscreen-${{ runner.os }}
+          path: app/build/acceptance/fullscreen
+          if-no-files-found: ignore
       - name: Package
         shell: bash
         run: |

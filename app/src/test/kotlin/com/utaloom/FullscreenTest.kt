@@ -52,8 +52,7 @@ class FullscreenTest {
                 }
             }
             fun fillsDisplay() = onEdt {
-                w.placement == WindowPlacement.Fullscreen && w.graphicsConfiguration.device.fullScreenWindow == w &&
-                    w.bounds == w.graphicsConfiguration.bounds && w.insets.top == 0 && w.insets.bottom == 0 &&
+                w.bounds == w.graphicsConfiguration.bounds && w.insets.top == 0 && w.insets.bottom == 0 &&
                     find(w, "Exit full screen (Esc)") != null && find(w, "Settings") == null
             }
             capture("windowed")
@@ -93,11 +92,11 @@ class FullscreenTest {
             await("Escape restores floating window", stableMillis = 300) { onEdt { w.placement == WindowPlacement.Floating && w.bounds == original && w.insets == originalInsets } }
             println("PASS: repeated F11 toggles and Escape restore window")
             key(KeyEvent.VK_F11)
-            await("Enter for rapid toggle") { onEdt { w.placement == WindowPlacement.Fullscreen } }
+            await("Enter for rapid toggle", condition = ::fillsDisplay)
             key(KeyEvent.VK_ESCAPE)
             await("Exit for rapid toggle") { onEdt { w.placement == WindowPlacement.Floating } }
             key(KeyEvent.VK_F11)
-            await("Re-enter before restore finishes") { onEdt { w.placement == WindowPlacement.Fullscreen && w.bounds == w.graphicsConfiguration.bounds } }
+            await("Re-enter before restore finishes", condition = ::fillsDisplay)
             key(KeyEvent.VK_ESCAPE)
             await("Rapid toggle restores original bounds", stableMillis = 300) { onEdt { w.placement == WindowPlacement.Floating && w.bounds == original && w.insets == originalInsets } }
             println("PASS: rapid re-entry cancels old restore without saving transient bounds")
@@ -116,11 +115,11 @@ class FullscreenTest {
                 key(KeyEvent.VK_ESCAPE)
                 await("Restore maximized placement", stableMillis = 300) { onEdt { w.placement == WindowPlacement.Maximized && w.insets == originalInsets && w.graphicsConfiguration.device.fullScreenWindow != w } }
                 key(KeyEvent.VK_F11)
-                await("Enter for maximized rapid toggle") { onEdt { w.placement == WindowPlacement.Fullscreen } }
+                await("Enter for maximized rapid toggle", condition = ::fillsDisplay)
                 key(KeyEvent.VK_ESCAPE)
                 await("Exit for maximized rapid toggle") { onEdt { w.placement == WindowPlacement.Maximized } }
                 key(KeyEvent.VK_F11)
-                await("Re-enter before maximized restore finishes") { onEdt { w.placement == WindowPlacement.Fullscreen } }
+                await("Re-enter before maximized restore finishes", condition = ::fillsDisplay)
                 key(KeyEvent.VK_ESCAPE)
                 await("Rapid toggle restores maximized window", stableMillis = 300) { onEdt { w.placement == WindowPlacement.Maximized && w.insets == originalInsets } }
                 onEdt { w.placement = WindowPlacement.Floating }
@@ -150,6 +149,7 @@ class FullscreenTest {
             check(onEdt { w.placement == WindowPlacement.Floating }) { "No current song must not enter fullscreen" }
             println("PASS: stopping exits fullscreen; no current song cannot enter it")
         } catch (e: Exception) {
+            System.getenv("UTALOOM_WM_ARTIFACTS")?.let { dir -> runCatching { javax.imageio.ImageIO.write(Robot().createScreenCapture(java.awt.Rectangle(java.awt.Toolkit.getDefaultToolkit().screenSize)), "png", java.io.File(dir, "failure.png")) } }
             println(onEdt { window?.let { "placement=${it.placement}, bounds=${it.bounds}, focused=${it.isFocused}, focusOwner=${it.focusOwner}, insets=${it.insets}, client=${clientSize(it)}" } })
             throw e
         } finally {

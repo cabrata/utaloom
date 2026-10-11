@@ -41,9 +41,35 @@ internal fun runApp(exitProcessOnExit: Boolean) {
         var fullscreen by remember { mutableStateOf(false) }
         fun setFullscreen(enabled: Boolean) {
             if (enabled == fullscreen) return
+            if (!isLinux) {
+                val w = awtWindow
+                fullscreen = enabled
+                if (w == null) return
+                if (enabled) {
+                    previousPlacement = windowState.placement
+                    previousBounds = w.bounds.takeIf { previousPlacement == WindowPlacement.Floating }
+                }
+                val placement = previousPlacement
+                val bounds = previousBounds
+                // AWT's exclusive fullscreen keeps the title bar on Windows and crashes when left twice, so use a
+                // borderless window covering the monitor instead, which the shell treats as fullscreen (no taskbar).
+                // Deferred so the native window is not rebuilt in the middle of a Compose layout pass.
+                javax.swing.SwingUtilities.invokeLater {
+                    if (fullscreen != enabled) return@invokeLater
+                    if (enabled && w.placement == WindowPlacement.Maximized) w.placement = WindowPlacement.Floating
+                    w.isVisible = false
+                    w.removeNotify()
+                    w.isUndecorated = enabled
+                    if (enabled) w.bounds = w.graphicsConfiguration.bounds else bounds?.let { w.bounds = it }
+                    w.isVisible = true
+                    if (!enabled && placement == WindowPlacement.Maximized) w.placement = WindowPlacement.Maximized
+                    w.toFront()
+                }
+                return
+            }
             // ponytail: the native placement juggling below works around X11 window managers. On Windows AWT's
             // exclusive fullscreen is synchronous and re-entering it crashes (realFSWindow null), so only Linux uses it.
-            val w = awtWindow?.takeIf { isLinux }
+            val w = awtWindow
             fullscreen = enabled
             restoreRequest++
             if (enabled) {
