@@ -74,7 +74,7 @@ fun HomeScreen() {
                 }
             }
             if (!page.chips.isNullOrEmpty()) item {
-                LazyRow(contentPadding = PaddingValues(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                HScrollRow(PaddingValues(horizontal = 24.dp), Arrangement.spacedBy(8.dp)) {
                     items(page.chips!!) { chip ->
                         AssistChip(onClick = { chip.endpoint?.let { Nav.go(Screen.Browse(chip.title, it)) } }, label = { Text(chip.title) })
                     }
@@ -157,7 +157,7 @@ fun SearchScreen(query: String) {
     LazyColumn(Modifier.fillMaxSize(), state, contentPadding = PaddingValues(bottom = 24.dp)) {
         item { Text("Results for \"$query\"", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp)) }
         item {
-            LazyRow(contentPadding = PaddingValues(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            HScrollRow(PaddingValues(horizontal = 24.dp), Arrangement.spacedBy(8.dp)) {
                 items(SearchFilters.keys.toList()) { f -> FilterChip(selected = f == filter, onClick = { filter = f }, label = { Text(f) }) }
             }
         }

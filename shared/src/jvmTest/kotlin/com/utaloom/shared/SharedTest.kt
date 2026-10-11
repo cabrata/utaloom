@@ -24,6 +24,10 @@ class SharedTest {
         assertEquals(1, l.lines[1].words.size)
         assertEquals(emptyList(), l.lines[2].words)
         assertEquals(0, l.currentIndex(1700)) // bg line never becomes active
+        assertEquals("v1", l.lines[1].agent)
+        assertEquals(setOf(0, 1), l.activeLines(1700))
+        assertEquals(emptySet(), l.activeLines(2500)) // sung out, dims until the next line
+        assertEquals(setOf(2), l.activeLines(3000))
     }
 
     @Test

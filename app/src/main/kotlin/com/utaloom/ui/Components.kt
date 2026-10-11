@@ -1,6 +1,26 @@
 package com.utaloom.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.HorizontalScrollbar
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.ScrollableDefaults
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollbarAdapter
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.rememberScrollState
@@ -353,7 +373,7 @@ fun LazyListScope.carousel(title: String, items: List<YTItem>, onMore: (() -> Un
         if (songsOnly && items.size > 4) {
             // Quick-picks style: songs laid out in columns of 4 rows.
             val songs = items.filterIsInstance<SongItem>().map { it.toSong() }
-            LazyRow(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp)) {
+            HScrollRow(androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp)) {
                 items(songs.chunked(4)) { col ->
                     Column(Modifier.width(380.dp)) {
                         col.forEach { s -> SongRow(s, { Player.playRadio(s) }) }
@@ -361,9 +381,45 @@ fun LazyListScope.carousel(title: String, items: List<YTItem>, onMore: (() -> Un
                 }
             }
         } else {
-            LazyRow(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp)) {
+            HScrollRow(androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp)) {
                 items(items, key = { it.id }) { ItemCard(it) }
             }
         }
+    }
+}
+
+/**
+ * Horizontal row usable without a trackpad: drag with mouse or touch screen (desktop scrollable ignores
+ * those), arrow buttons on hover, and a scrollbar.
+ */
+@Composable
+fun HScrollRow(
+    contentPadding: androidx.compose.foundation.layout.PaddingValues,
+    arrangement: Arrangement.Horizontal = Arrangement.Start,
+    content: LazyListScope.() -> Unit,
+) {
+    val state = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val fling = ScrollableDefaults.flingBehavior()
+    val hover = remember { MutableInteractionSource() }
+    val hovered by hover.collectIsHoveredAsState()
+    BoxWithConstraints(Modifier.fillMaxWidth().hoverable(hover)) {
+        val page = constraints.maxWidth * 0.8f
+        LazyRow(
+            Modifier.fillMaxWidth().padding(bottom = 10.dp).draggable(
+                rememberDraggableState { state.dispatchRawDelta(-it) },
+                Orientation.Horizontal,
+                onDragStopped = { v -> state.scroll { with(fling) { performFling(-v) } } },
+            ),
+            state, contentPadding, horizontalArrangement = arrangement, content = content,
+        )
+        HorizontalScrollbar(rememberScrollbarAdapter(state), Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 16.dp))
+        @Composable
+        fun Arrow(show: Boolean, icon: ImageVector, label: String, align: Alignment, dir: Float) =
+            AnimatedVisibility(show, Modifier.align(align).padding(horizontal = 4.dp, vertical = 0.dp), enter = fadeIn(), exit = fadeOut()) {
+                FilledTonalIconButton({ scope.launch { state.animateScrollBy(dir * page) } }) { Icon(icon, label) }
+            }
+        Arrow(hovered && state.canScrollBackward, Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Scroll left", Alignment.CenterStart, -1f)
+        Arrow(hovered && state.canScrollForward, Icons.AutoMirrored.Filled.KeyboardArrowRight, "Scroll right", Alignment.CenterEnd, 1f)
     }
 }

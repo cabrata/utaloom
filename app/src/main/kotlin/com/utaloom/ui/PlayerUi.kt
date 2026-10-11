@@ -54,6 +54,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
@@ -534,6 +535,8 @@ fun LyricsPanel(modifier: Modifier = Modifier, compact: Boolean = false) {
             val items = remember(ly) { lyricItems(ly.lines) }
             // Focus = latest started line or gap. Background vocals never take focus, they light up with their line.
             val current = items.indexOfLast { (it.line < 0 || !ly.lines[it.line].background) && it.startMs <= pos + 300 }
+            // Like Android: lit only while being sung, so a finished line dims and duet lines can light together.
+            val sung = ly.activeLines(pos)
             val list = rememberLazyListState()
             val hover = remember { MutableInteractionSource() }
             val hovered by hover.collectIsHoveredAsState()
@@ -557,13 +560,17 @@ fun LyricsPanel(modifier: Modifier = Modifier, compact: Boolean = false) {
                             return@itemsIndexed
                         }
                         val line = ly.lines[item.line]
-                        val active = i == current || (current >= 0 && i > current && line.background && line.timeMs <= pos + 300 && (current + 1 until i).all { items[it].line >= 0 && ly.lines[items[it].line].background })
-                        LyricRow(
-                            line, active, distance = if (current < 0) i + 1 else abs(i - current), pos = if (active) pos else 0L,
-                            style = if (line.background) style.copy(fontSize = fontSize * 0.7f, lineHeight = fontSize * 0.9f, fontStyle = FontStyle.Italic) else style,
-                            sharp = hovered || compact,
-                            onClick = if (guest) null else ({ Player.seekTo(line.timeMs); if (!s.isPlaying) Player.play() }),
-                        )
+                        val active = item.line in sung
+                        // Background vocals only show while they or their main line are sung.
+                        val visible = !line.background || active || ly.mainOf(item.line) in sung
+                        Box(Modifier.fillMaxWidth().animateContentSize()) {
+                            if (visible) LyricRow(
+                                line, active, distance = if (current < 0) i + 1 else abs(i - current), pos = if (active) pos else 0L,
+                                style = if (line.background) style.copy(fontSize = fontSize * 0.7f, lineHeight = fontSize * 0.9f, fontStyle = FontStyle.Italic) else style,
+                                sharp = hovered || compact,
+                                onClick = if (guest) null else ({ Player.seekTo(line.timeMs); if (!s.isPlaying) Player.play() }),
+                            )
+                        }
                     }
                 }
             }
@@ -598,22 +605,29 @@ private fun LyricRow(line: LyricLine, active: Boolean, distance: Int, pos: Long,
     val scale by animateFloatAsState(if (active) 1f else 0.94f, motion)
     val alpha by animateFloatAsState(if (active) 1f else if (sharp) 0.5f else 0.42f - d * 0.05f, motion)
     val blur by animateDpAsState(if (active || sharp) 0.dp else (d * 1.2f).dp, spring(stiffness = 120f))
+    // Duet: second singer on the right, both together centered.
+    val (align, textAlign, originX) = when (line.agent) {
+        "v2" -> Triple(Alignment.End, TextAlign.End, 1f)
+        "v1000" -> Triple(Alignment.CenterHorizontally, TextAlign.Center, 0.5f)
+        else -> Triple(Alignment.Start, TextAlign.Start, 0f)
+    }
     Column(
         Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(12.dp))
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 16.dp, vertical = 10.dp)
-            .graphicsLayer { scaleX = scale; scaleY = scale; this.alpha = alpha; transformOrigin = TransformOrigin(0f, 0.5f) }
+            .graphicsLayer { scaleX = scale; scaleY = scale; this.alpha = alpha; transformOrigin = TransformOrigin(originX, 0.5f) }
             .blur(blur, BlurredEdgeTreatment.Unbounded)
             .animateContentSize(),
+        horizontalAlignment = align,
     ) {
         when {
             active && line.words.isNotEmpty() -> {
                 val gap = with(LocalDensity.current) { (style.fontSize * 0.26f).toDp() }
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(gap)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(gap, align)) {
                     for (w in lyricWordGroups(line.text, line.words)) KaraokeWord(w, pos, style, color)
                 }
             }
-            else -> Text(line.text, style = style, color = color)
+            else -> Text(line.text, style = style, color = color, textAlign = textAlign)
         }
     }
 }

@@ -2,11 +2,37 @@ package com.utaloom.shared
 
 data class LyricWord(val text: String, val startMs: Long, val endMs: Long)
 
-data class LyricLine(val timeMs: Long, val text: String, val words: List<LyricWord> = emptyList(), val background: Boolean = false)
+/** [agent] is the duet voice ("v1", "v2", "v1000" = together) when the source tags singers. */
+data class LyricLine(val timeMs: Long, val text: String, val words: List<LyricWord> = emptyList(), val background: Boolean = false, val agent: String? = null)
 
 data class Lyrics(val provider: String, val synced: Boolean, val lines: List<LyricLine>, val plain: String) {
     /** Background vocals overlap the main line, so they never become the active line. */
     fun currentIndex(posMs: Long): Int = if (!synced) -1 else lines.indexOfLast { !it.background && it.timeMs <= posMs + 300 }
+
+    /**
+     * Lines being sung at [posMs], like Android: a line is lit from its start until its last word ends
+     * (or the next line starts when not word-synced), so duet lines can overlap and a finished line dims.
+     * An active background line also lights its main line.
+     */
+    fun activeLines(posMs: Long): Set<Int> {
+        if (!synced) return emptySet()
+        val active = mutableSetOf<Int>()
+        for (i in lines.indices) {
+            val l = lines[i]
+            if (l.timeMs > posMs) break
+            val end = l.words.lastOrNull()?.endMs ?: lines.getOrNull(i + 1)?.timeMs ?: Long.MAX_VALUE
+            if (posMs <= end && l.text.isNotBlank()) active += i
+        }
+        if (lines.none { it.words.isNotEmpty() }) {
+            val main = active.filter { !lines[it].background }
+            if (main.size > 1) active.removeAll(main.dropLast(1).toSet())
+        }
+        active.filter { lines[it].background }.forEach { b -> mainOf(b)?.let { active += it } }
+        return active
+    }
+
+    /** The main line a background line belongs to. */
+    fun mainOf(i: Int): Int? = (i - 1 downTo 0).firstOrNull { !lines[it].background }
 }
 
 /**
@@ -82,6 +108,7 @@ fun plainLyrics(provider: String, text: String) = Lyrics(provider, false, text.l
 fun parseLrc(provider: String, lrc: String): Lyrics {
     val lines = mutableListOf<LyricLine>()
     var lastAdded = 0
+    var agent: String? = null
     for (raw in lrc.lines()) {
         wordBlock.find(raw.trim())?.let { m ->
             val words = m.groupValues[1].split('|').mapNotNull { w ->
@@ -102,10 +129,12 @@ fun parseLrc(provider: String, lrc: String): Lyrics {
         if (voice != null) text = text.substring(voice.length).trim()
         // ponytail: only explicitly tagged {bg} lines count as background; untagged lines continuing a bg run show as main.
         val bg = voice == "{bg}"
+        // Background vocals follow their singer's side.
+        if (voice?.startsWith("{agent:") == true) agent = voice.removePrefix("{agent:").removeSuffix("}")
         for (t in tags) {
             val (m, s, f) = t.destructured
             val frac = when (f.length) { 0 -> 0; 1 -> f.toInt() * 100; 2 -> f.toInt() * 10; else -> f.take(3).toInt() }
-            lines += LyricLine(m.toLong() * 60_000 + s.toLong() * 1000 + frac, text, background = bg)
+            lines += LyricLine(m.toLong() * 60_000 + s.toLong() * 1000 + frac, text, background = bg, agent = agent)
             lastAdded++
         }
     }
