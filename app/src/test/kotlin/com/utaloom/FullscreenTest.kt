@@ -27,8 +27,9 @@ class FullscreenTest {
     @Test
     @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     fun playerControlsAndKeyboardRestoreWindow() {
-        // ponytail: Windows uses Compose's own fullscreen (as in 1.2.0), which keeps AWT's title bar; Linux-only checks.
-        assumeTrue("Needs Linux graphical display and VLC", !GraphicsEnvironment.isHeadless() && NativeLibs.discoverVlc() == null && System.getProperty("os.name").lowercase().contains("linux"))
+        assumeTrue("Needs a graphical display and VLC", !GraphicsEnvironment.isHeadless() && NativeLibs.discoverVlc() == null)
+        // ponytail: Windows uses Compose's own fullscreen (as in 1.2.0), which keeps AWT's title bar there.
+        val linux = System.getProperty("os.name").lowercase().contains("linux")
         val settings = Stores.settings.value
         val queue = Stores.queue.value
         Stores.settings.update { it.copy(minimizeToTray = false, visitorData = "fullscreen-test", lyricsDisabled = it.lyricsProviderOrder.toSet()) }
@@ -53,7 +54,7 @@ class FullscreenTest {
                 }
             }
             fun fillsDisplay() = onEdt {
-                w.bounds == w.graphicsConfiguration.bounds && w.insets.top == 0 && w.insets.bottom == 0 &&
+                (if (linux) w.bounds == w.graphicsConfiguration.bounds && w.insets.top == 0 && w.insets.bottom == 0 else w.placement == WindowPlacement.Fullscreen) &&
                     find(w, "Exit full screen (Esc)") != null && find(w, "Settings") == null
             }
             capture("windowed")

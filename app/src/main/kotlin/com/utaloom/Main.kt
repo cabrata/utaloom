@@ -45,7 +45,18 @@ internal fun runApp(exitProcessOnExit: Boolean) {
                 // Same as 1.2.0, which users found stable on Windows: let Compose drive the placement.
                 fullscreen = enabled
                 if (enabled) previousPlacement = windowState.placement
-                windowState.placement = if (enabled) WindowPlacement.Fullscreen else previousPlacement
+                val target = if (enabled) WindowPlacement.Fullscreen else previousPlacement
+                windowState.placement = target
+                // ponytail: Compose can mirror a native resize back into the state while in exclusive fullscreen, so
+                // the state change above may be a no-op and the window stays stuck. Leave the native mode explicitly,
+                // deferred out of the Compose event/layout pass, and only if still ours (a second exit crashes AWT).
+                val w = awtWindow
+                if (!enabled && w != null) javax.swing.SwingUtilities.invokeLater {
+                    if (fullscreen) return@invokeLater
+                    val dev = w.graphicsConfiguration.device
+                    if (dev.fullScreenWindow === w) dev.fullScreenWindow = null
+                    if (w.placement != target) w.placement = target
+                }
                 return
             }
             // ponytail: the native placement juggling below works around X11 window managers. On Windows AWT's
