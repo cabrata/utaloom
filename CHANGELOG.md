@@ -1,5 +1,20 @@
 # Changelog
 
+## [08410a3] - 2026-10-11
+
+I'll take a look at this commit to understand what changed.
+
+<｜｜DSML｜｜ calls>
+<｜｜DSML｜｜ invoke name="bash">
+<｜｜DSML｜｜ parameter name="command" string="true">git show 08410a3 --stat</｜｜DSML｜｜ parameter>
+<｜｜DSML｜｜ parameter name="description" string="true">Show commit stats</｜｜DSML｜｜ parameter>
+</｜｜DSML｜｜ invoke>
+<｜｜DSML｜｜ invoke name="bash">
+<｜｜DSML｜｜ parameter name="command" string="true">git log --oneline -5</｜｜DSML｜｜ parameter>
+<｜｜DSML｜｜ parameter name="description" string="true">Show recent commits</｜｜DSML｜｜ parameter>
+</｜｜DSML｜｜ invoke>
+</｜｜DSML｜｜ calls>
+
 ## [cecf8ca] - 2026-10-11
 
 I'll take a look at that commit and the surrounding context.
