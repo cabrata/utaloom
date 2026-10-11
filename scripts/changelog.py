@@ -19,7 +19,7 @@ if not API_URL:
 API_URL += "/chat/completions"
 API_KEY = os.getenv("OPENAI_API_KEY")
 MODEL = os.getenv("AI_MODEL") or "combo"
-CHANGELOG_FILE = "CHANGELOG.md"
+CHANGELOG_FILE = os.getenv("CHANGELOG_FILE", "CHANGELOG.md")
 MAIN_HEADER = "# Changelog\n\n"
 
 # Commits that are changelog noise (produced by this tooling / version bumps).
@@ -165,6 +165,38 @@ META_RE = re.compile(
 )
 
 
+def fix_links(text):
+    """Replace markdown links with their text when the target is not a real URL."""
+    def repl(m):
+        label, target = m.group(1), m.group(2)
+        if re.match(r"^https?://", target) or target.startswith("#"):
+            return m.group(0)
+        return label
+    return re.sub(r"\[([^\]]+)\]\(([^)]*)\)", repl, text)
+
+
+def dedupe_bullets(lines):
+    """Drop bullets that substantially restate a longer bullet (token overlap)."""
+    def tokens(s):
+        return {w for w in re.findall(r"[a-z0-9]+", s.lower()) if len(w) > 2}
+
+    bullets = [i for i, l in enumerate(lines) if l.startswith("- ")]
+    drop = set()
+    for i in range(len(bullets)):
+        for j in range(i + 1, len(bullets)):
+            a, b = bullets[i], bullets[j]
+            if a in drop or b in drop:
+                continue
+            ta, tb = tokens(lines[a]), tokens(lines[b])
+            if not ta or not tb:
+                continue
+            overlap = len(ta & tb) / min(len(ta), len(tb))
+            if overlap >= 0.7:
+                shorter = a if len(lines[a]) <= len(lines[b]) else b
+                drop.add(shorter)
+    return [l for i, l in enumerate(lines) if i not in drop]
+
+
 def sanitize_section(text):
     """Keep only canonical '### Section' headings and '- ' bullets.
 
@@ -173,7 +205,7 @@ def sanitize_section(text):
     user. Bullets that appear before any heading are collected under
     '### Changed'.
     """
-    text = strip_code_fences(text)
+    text = fix_links(strip_code_fences(text))
     lines = []
     current = None
     for line in text.splitlines():
@@ -198,6 +230,8 @@ def sanitize_section(text):
                 lines.append("### Changed")
                 current = "### Changed"
             lines.append("- " + item)
+
+    lines = dedupe_bullets(lines)
 
     # Drop section headings that ended up with no bullets under them.
     pruned = []
@@ -427,6 +461,14 @@ def run_self_test():
         "- **Version:** I used `[Unreleased]`; swap the heading if needed.\n"
     )
     assert extract_changelog_section(meta) == "### Fixed\n- **player:** real fix ([0f816a4])", "Failed meta drop"
+    # Placeholder links are unwrapped; real URLs are kept.
+    assert fix_links("- x ([c0a42f5](link-to-commit))") == "- x (c0a42f5)", "Failed placeholder link fix"
+    assert fix_links("[a](https://x/y)") == "[a](https://x/y)", "Real link should be kept"
+    # Near-duplicate bullets are collapsed to the longer one.
+    dup = "### Added\n- **listentogether:** default server and v1+v2 signing (a810c37)\n- **listentogether:** default the server (a810c37)"
+    assert extract_changelog_section(dup) == (
+        "### Added\n- **listentogether:** default server and v1+v2 signing (a810c37)"
+    ), "Failed bullet dedupe"
     assert extract_changelog_section("Just prose, no bullets.") == "", "Should reject bullet-less output"
     assert strip_code_fences("a\n```\ncode\n```\nb") == "a\nb", "Failed fence removal"
     assert has_chatter("### Added\n- a (1)\nTell me which format you prefer."), "has_chatter missed prose"
