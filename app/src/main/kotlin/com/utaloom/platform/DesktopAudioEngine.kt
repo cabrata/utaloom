@@ -1,25 +1,70 @@
 package com.utaloom.playback
 
+import com.sun.jna.Library
+import com.sun.jna.Native
+import com.sun.jna.Pointer
+import com.sun.jna.Structure
+import com.utaloom.data.Stores
 import uk.co.caprica.vlcj.factory.MediaPlayerFactory
 import uk.co.caprica.vlcj.player.base.MediaPlayer
 import uk.co.caprica.vlcj.player.base.MediaPlayerEventAdapter
 
-fun createAudioEngine(pitch: Int = 0): AudioEngine {
-    val pitchOptions = if (pitch != 0) listOf("--audio-filter=scaletempo_pitch", "--pitch-shift=$pitch") else emptyList()
-    val options = listOf("--no-video", "--network-caching=1500") +
-        (if (System.getenv("UTALOOM_DEBUG") == null) listOf("--quiet") else listOf("--verbose=1")) +
-        pitchOptions
+@Structure.FieldOrder("psz_string", "pad")
+open class VlcValue : Structure() {
+    class ByValue : VlcValue(), Structure.ByValue
+    @JvmField var psz_string: String? = null
+    @JvmField var pad: Long = 0L
+}
+
+interface LibVlcCore : Library {
+    fun var_SetChecked(obj: Pointer, name: String, type: Int, value: VlcValue.ByValue): Int
+
+    companion object {
+        val INSTANCE: LibVlcCore? = runCatching {
+            Native.load("vlccore", LibVlcCore::class.java)
+        }.getOrNull()
+    }
+}
+
+fun audioEngineOptions(pitch: Int = 0): List<String> {
+    val boundedPitch = AudioEffects.sanitizePitch(pitch)
+    val filterChain = if (boundedPitch != 0) "scaletempo:scaletempo_pitch" else "scaletempo"
+    return buildList {
+        add("--no-video")
+        add("--network-caching=1500")
+        add("--audio-filter=$filterChain")
+        if (boundedPitch != 0) {
+            add("--pitch-shift=$boundedPitch")
+        }
+        if (System.getenv("UTALOOM_DEBUG") == null) add("--quiet") else add("--verbose=1")
+    }
+}
+
+fun createAudioEngine(pitch: Int = Stores.settings.value.playbackPitch): AudioEngine {
+    val boundedPitch = AudioEffects.sanitizePitch(pitch)
+    val options = audioEngineOptions(boundedPitch)
     val factory = MediaPlayerFactory(*options.toTypedArray())
     return try {
-        DesktopAudioEngine(factory, factory.mediaPlayers().newMediaPlayer())
+        AudioEffects.populateFromFactory(factory)
+        val player = factory.mediaPlayers().newMediaPlayer()
+        DesktopAudioEngine(factory, player, boundedPitch)
     } catch (e: Throwable) {
         factory.release()
         throw e
     }
 }
 
-private class DesktopAudioEngine(private val factory: MediaPlayerFactory, private val player: MediaPlayer) : AudioEngine {
+private class DesktopAudioEngine(
+    private val factory: MediaPlayerFactory,
+    private val player: MediaPlayer,
+    private val pitch: Int,
+) : AudioEngine {
     private val listeners = mutableMapOf<AudioEngine.Listener, MediaPlayerEventAdapter>()
+    private var lastEqEnabled = false
+
+    init {
+        syncAudioFilter(player, pitch, enabled = false)
+    }
 
     @Synchronized override fun addListener(listener: AudioEngine.Listener) {
         if (listener in listeners) return
@@ -47,20 +92,32 @@ private class DesktopAudioEngine(private val factory: MediaPlayerFactory, privat
     override fun seek(positionMs: Long) { player.controls().setTime(positionMs) }
     override fun stop() { player.controls().stop() }
     override fun setVolume(volume: Int) { player.audio().setVolume(volume) }
-    override fun setRate(rate: Float) { player.controls().setRate(rate) }
 
     override fun setEqualizer(enabled: Boolean, preamp: Float, bands: List<Float>) {
+        lastEqEnabled = enabled
         if (!enabled) {
             player.audio().setEqualizer(null)
+            syncAudioFilter(player, pitch, enabled = false)
             return
         }
         val eq = factory.equalizer().newEqualizer()
-        eq.setPreamp(preamp.coerceIn(-20f, 20f))
-        bands.take(10).forEachIndexed { i, gain ->
-            eq.setAmp(i, gain.coerceIn(-20f, 20f))
+        eq.setPreamp(AudioEffects.sanitizePreamp(preamp))
+        val count = minOf(eq.bandCount(), bands.size)
+        for (i in 0 until count) {
+            val amp = bands[i]
+            if (amp.isFinite()) eq.setAmp(i, AudioEffects.sanitizePreamp(amp))
         }
         player.audio().setEqualizer(eq)
+        syncAudioFilter(player, pitch, enabled = true)
     }
+
+    override fun setRate(rate: Float): Boolean {
+        val validRate = AudioEffects.sanitizeSpeed(rate)
+        return player.controls().setRate(validRate)
+    }
+
+    override val rate: Float
+        get() = player.status().rate().takeIf { it.isFinite() && it > 0f } ?: 1f
 
     override fun load(url: String, headers: Map<String, String>, startPaused: Boolean): Boolean {
         // ponytail: VLC supports User-Agent and Referer options, add a custom HTTP layer if other headers are required.
@@ -74,7 +131,9 @@ private class DesktopAudioEngine(private val factory: MediaPlayerFactory, privat
             "start-paused".takeIf { startPaused },
             ":http-reconnect".takeIf { url.startsWith("http://", ignoreCase = true) || url.startsWith("https://", ignoreCase = true) },
         )
-        return player.media().play(url, *options.toTypedArray())
+        val loaded = player.media().play(url, *options.toTypedArray())
+        if (loaded) syncAudioFilter(player, pitch, lastEqEnabled)
+        return loaded
     }
 
     override val time: Long get() = player.status().time()
@@ -85,6 +144,23 @@ private class DesktopAudioEngine(private val factory: MediaPlayerFactory, privat
             player.release()
         } finally {
             factory.release()
+        }
+    }
+
+    companion object {
+        internal fun syncAudioFilter(player: MediaPlayer, pitch: Int, enabled: Boolean) {
+            val bounded = AudioEffects.sanitizePitch(pitch)
+            val filterString = when {
+                enabled && bounded != 0 -> "equalizer:scaletempo:scaletempo_pitch"
+                enabled -> "equalizer:scaletempo"
+                bounded != 0 -> "scaletempo:scaletempo_pitch"
+                else -> "scaletempo"
+            }
+            runCatching {
+                val ptr = player.mediaPlayerInstance()?.getPointer() ?: return@runCatching
+                val vlcVal = VlcValue.ByValue().apply { psz_string = filterString }
+                LibVlcCore.INSTANCE?.var_SetChecked(ptr, "audio-filter", 0x0040, vlcVal)
+            }
         }
     }
 }
