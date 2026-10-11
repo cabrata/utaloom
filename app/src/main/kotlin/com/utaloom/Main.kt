@@ -45,18 +45,7 @@ internal fun runApp(exitProcessOnExit: Boolean) {
                 // Same as 1.2.0, which users found stable on Windows: let Compose drive the placement.
                 fullscreen = enabled
                 if (enabled) previousPlacement = windowState.placement
-                val target = if (enabled) WindowPlacement.Fullscreen else previousPlacement
-                windowState.placement = target
-                // ponytail: Compose can mirror a native resize back into the state while in exclusive fullscreen, so
-                // the state change above may be a no-op and the window stays stuck. Leave the native mode explicitly,
-                // deferred out of the Compose event/layout pass, and only if still ours (a second exit crashes AWT).
-                val w = awtWindow
-                if (!enabled && w != null) javax.swing.SwingUtilities.invokeLater {
-                    if (fullscreen) return@invokeLater
-                    val dev = w.graphicsConfiguration.device
-                    if (dev.fullScreenWindow === w) dev.fullScreenWindow = null
-                    if (w.placement != target) w.placement = target
-                }
+                windowState.placement = if (enabled) WindowPlacement.Fullscreen else previousPlacement
                 return
             }
             // ponytail: the native placement juggling below works around X11 window managers. On Windows AWT's
@@ -183,6 +172,24 @@ internal fun runApp(exitProcessOnExit: Boolean) {
                     kotlinx.coroutines.delay(50)
                 }
                 if (request == restoreRequest) restoreTo = null
+            }
+            // ponytail: on Windows a native resize can be mirrored back into the state and undo an exit (or entry),
+            // so keep re-applying the requested placement until it holds. Runs between frames, never during layout.
+            if (!isLinux) LaunchedEffect(fullscreen) {
+                var stable = 0
+                repeat(60) {
+                    val want = if (fullscreen) WindowPlacement.Fullscreen else previousPlacement
+                    if (window.placement == want && windowState.placement == want) {
+                        if (++stable >= 4) return@LaunchedEffect
+                    } else {
+                        stable = 0
+                        // Compose's own setter leaves exclusive mode once; clearing the device too crashes AWT
+                        // (realFSWindow null), so never touch fullScreenWindow directly here.
+                        if (window.placement != want) window.placement = want
+                        windowState.placement = want
+                    }
+                    kotlinx.coroutines.delay(50)
+                }
             }
             SideEffect {
                 awtWindow = window
