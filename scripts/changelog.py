@@ -2,11 +2,14 @@
 # ponytail: simple stdlib urllib client; upgrade to httpx/sdk if retries or streaming needed.
 import argparse
 import datetime
+import http.client
 import json
 import os
 import re
 import subprocess
 import sys
+import time
+import urllib.error
 import urllib.request
 
 DEFAULT_BASE_URL = "https://9router.caliph.dev/v1"
@@ -19,18 +22,18 @@ MODEL = os.getenv("AI_MODEL") or "combo"
 CHANGELOG_FILE = "CHANGELOG.md"
 MAIN_HEADER = "# Changelog\n\n"
 
-# Commits that are changelog noise (they are produced by this tooling itself).
-NOISE_RE = re.compile(r"^docs\(changelog\):", re.IGNORECASE)
+# Commits that are changelog noise (produced by this tooling / version bumps).
+NOISE_RE = re.compile(r"^(docs\(changelog\)|chore\(release\)):", re.IGNORECASE)
 
 SYSTEM_PROMPT = (
-    "You are an automated changelog generator. You convert a raw git commit list into a "
-    "concise CHANGELOG section.\n"
+    "You are an automated changelog generator. You convert a raw git commit list for a "
+    "single release into a concise changelog section.\n"
     "Rules:\n"
     "- Reply with ONLY the changelog content. Never ask questions, never add a preamble, "
     "never offer options, never mention being an AI.\n"
-    "- Group entries under the headings '### Features', '### Fixes', '### Improvements'; "
-    "omit a heading when it has no entries.\n"
-    "- Each entry is one bullet line: '- **scope:** summary (hash)'.\n"
+    "- Use Keep a Changelog headings, only the ones that apply, in this order: "
+    "'### Added', '### Changed', '### Fixed', '### Removed'.\n"
+    "- Each entry is one bullet line: '- **scope:** summary (`hash`)'.\n"
     "- Drop chore/release/bump/merge noise unless it is notable.\n"
     "- Do not wrap the output in markdown code fences."
 )
@@ -64,62 +67,165 @@ def filter_noise(commits):
     return "\n".join(kept)
 
 
-def get_commits_for_range(rev_range=None):
-    if rev_range and not set(rev_range) <= {"0"}:
-        commits = git_cmd("log", rev_range, "--pretty=format:* %s (%h)")
-        if commits:
-            return filter_noise(commits)
-        # Range resolved but produced nothing (e.g. a branch deletion); fall through.
-    # Fallback to recent commits
-    return filter_noise(git_cmd("log", "-n", "10", "--pretty=format:* %s (%h)"))
+def list_release_tags():
+    """All SemVer release tags (vX.Y.Z), oldest first."""
+    out = git_cmd("tag", "--sort=v:refname", "--list", "v[0-9]*")
+    tags = [t for t in out.splitlines() if re.fullmatch(r"v\d+\.\d+\.\d+", t.strip())]
+    return tags
 
 
-def get_commits_since_last_tag():
-    # Prefer the last tag reachable from HEAD^ (the version this release follows).
-    last_tag = git_cmd("describe", "--tags", "--abbrev=0", "HEAD^")
-    if last_tag:
-        commits = git_cmd("log", f"{last_tag}..HEAD", "--pretty=format:* %s (%h)")
-        if commits:
-            return filter_noise(commits)
-    # Otherwise the most recent tag overall.
-    last_tag = git_cmd("describe", "--tags", "--abbrev=0")
-    if last_tag:
-        commits = git_cmd("log", f"{last_tag}..HEAD", "--pretty=format:* %s (%h)")
-        if commits:
-            return filter_noise(commits)
-    return filter_noise(git_cmd("log", "-n", "20", "--pretty=format:* %s (%h)"))
+def tag_date(tag):
+    date = git_cmd("log", "-1", "--format=%cs", tag)
+    return date or datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+
+
+def get_commits_for_range(rev_range):
+    """Commit lines for a git revision range, with noise filtered out."""
+    if not rev_range:
+        return ""
+    return filter_noise(git_cmd("log", rev_range, "--pretty=format:* %s (%h)"))
+
+
+def get_commits_for_release(tag):
+    """Commits introduced by `tag`, i.e. everything since the previous release."""
+    tags = list_release_tags()
+    if tag not in tags:
+        # The tag does not exist yet (release workflow runs before tagging):
+        # take everything since the latest existing release.
+        return get_commits_since_latest_tag()
+    idx = tags.index(tag)
+    prev = tags[idx - 1] if idx > 0 else None
+    rev_range = f"{prev}..{tag}" if prev else tag
+    return get_commits_for_range(rev_range)
+
+
+# Map whatever section wording the model emits onto Keep a Changelog headings.
+HEADING_MAP = {
+    "added": "### Added",
+    "add": "### Added",
+    "feature": "### Added",
+    "features": "### Added",
+    "new": "### Added",
+    "changed": "### Changed",
+    "change": "### Changed",
+    "changes": "### Changed",
+    "improvement": "### Changed",
+    "improvements": "### Changed",
+    "deprecated": "### Changed",
+    "fixed": "### Fixed",
+    "fix": "### Fixed",
+    "fixes": "### Fixed",
+    "bug fix": "### Fixed",
+    "bug fixes": "### Fixed",
+    "removed": "### Removed",
+    "remove": "### Removed",
+    "removals": "### Removed",
+    "deprecations": "### Removed",
+}
+
+
+def normalize_heading(line):
+    """Return a canonical '### X' heading, or None if the line is not a section."""
+    m = re.match(r"^#{2,4}\s+(.*?)\s*$", line.strip())
+    if not m:
+        return None
+    title = m.group(1).strip().rstrip(":").strip().lower()
+    title = re.sub(r"[^a-z ]", "", title).strip()
+    return HEADING_MAP.get(title)
+
+
+def strip_code_fences(text):
+    """Remove fenced code blocks (``` ... ```) entirely."""
+    out = []
+    in_fence = False
+    for line in text.splitlines():
+        if line.strip().startswith("```"):
+            in_fence = not in_fence
+            continue
+        if not in_fence:
+            out.append(line)
+    return "\n".join(out)
+
+
+# Bullets that are really notes from the model to the user, not changelog items.
+META_RE = re.compile(
+    r"("
+    r"^\s*[*-]\s*\*{0,2}(format|version|date|scope label|note|commit|order)\*{0,2}:|"
+    r"\bkeep a changelog\b|\bunreleased\b|\bconvention\b|\bswap the heading\b|"
+    r"\bdrop-in\b|\bno version/date header\b|\bbreaking/api surface\b|"
+    r"\bcommit:\s*`|\bthe version/date\b|\bassume[sd]?\b|\badjust if\b|"
+    r"\bgrouped under\b|\bdon'?t affect runtime\b|\bsuperseded later\b|\bno code changes\b|"
+    r"\bI (used|kept|left|dropped|treated|put|described|can|could|would|omitted|assumed|merged)\b|"
+    r"\bI'll\b|\bI've\b|\bI will\b|\btell me\b|\blet me know\b|\byou'?d prefer\b|"
+    r"\bif you (use|want|prefer|need|'?d)\b|\bif the CI\b|\bif your changelog\b|"
+    r"\bif any of these\b|\brather than the implementation\b|\bso I \b|\bthe UI work is\b|"
+    r"\bthese (two|three|five|four|six) commits\b|\bship together\b|\bnet effect is zero\b"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def sanitize_section(text):
+    """Keep only canonical '### Section' headings and '- ' bullets.
+
+    Drops model chatter, stray '## [Unreleased]' headings, horizontal rules,
+    prose paragraphs, code fences, and bullets that are really meta-notes to the
+    user. Bullets that appear before any heading are collected under
+    '### Changed'.
+    """
+    text = strip_code_fences(text)
+    lines = []
+    current = None
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        heading = normalize_heading(stripped)
+        if heading:
+            if heading == current:
+                continue  # merge duplicate consecutive sections
+            if lines and lines[-1] != "":
+                lines.append("")
+            lines.append(heading)
+            current = heading
+            continue
+        if stripped.startswith(("- ", "* ")):
+            item = stripped[2:].strip()
+            if META_RE.search(item):
+                continue  # model commentary, not a changelog entry
+            if current is None:
+                lines.append("")
+                lines.append("### Changed")
+                current = "### Changed"
+            lines.append("- " + item)
+
+    # Drop section headings that ended up with no bullets under them.
+    pruned = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if re.match(r"^###\s", line):
+            has_bullet = i + 1 < len(lines) and lines[i + 1].startswith("- ")
+            if not has_bullet:
+                i += 1
+                continue
+        pruned.append(line)
+        i += 1
+
+    # Collapse any leftover blank-line runs.
+    compact = []
+    for line in pruned:
+        if line == "" and (not compact or compact[-1] == ""):
+            continue
+        compact.append(line)
+
+    body = "\n".join(compact).strip()
+    return body
 
 
 def extract_changelog_section(text):
-    """Drop any model preamble/trailing chatter and keep only the changelog body.
-
-    Returns "" when the model produced no bullet points at all.
-    """
-    lines = text.splitlines()
-    start = None
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        if re.match(r"^#{1,6}\s+\S", stripped) or stripped.startswith(("- ", "* ")):
-            start = i
-            break
-    if start is None:
-        return ""
-
-    lines = lines[start:]
-    # Drop a redundant leading "## Changelog" heading (we add our own).
-    while lines and re.match(r"^#{1,6}\s+changelog\s*$", lines[0].strip(), re.IGNORECASE):
-        lines.pop(0)
-
-    # Trim trailing separators/prose the model tacked on after the last bullet.
-    end = len(lines)
-    while end > 0:
-        stripped = lines[end - 1].strip()
-        if stripped.startswith(("- ", "* ")) or re.match(r"^#{1,6}\s+\S", stripped):
-            break
-        end -= 1
-    lines = lines[:end]
-
-    body = "\n".join(lines).strip()
+    """Return a clean changelog body, or "" when nothing usable was produced."""
+    body = sanitize_section(text)
     if not any(l.strip().startswith(("- ", "* ")) for l in body.splitlines()):
         return ""
     return body
@@ -136,7 +242,7 @@ def has_chatter(section):
     return False
 
 
-def call_api(messages, temperature=0.2):
+def call_api(messages, temperature=0.2, attempts=4):
     payload = {
         "model": MODEL,
         "stream": False,
@@ -151,9 +257,38 @@ def call_api(messages, temperature=0.2):
             "Authorization": f"Bearer {API_KEY}",
         },
     )
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        res = json.loads(resp.read().decode("utf-8"))
-    return clean_markdown_fences(res["choices"][0]["message"]["content"])
+    last_err = None
+    for attempt in range(1, attempts + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                res = json.loads(resp.read().decode("utf-8"))
+            return clean_markdown_fences(res["choices"][0]["message"]["content"])
+        except (urllib.error.URLError, http.client.HTTPException, OSError, KeyError, ValueError) as err:
+            last_err = err
+            if attempt < attempts:
+                time.sleep(2 * attempt)
+    raise RuntimeError(f"AI request failed after {attempts} attempts: {last_err}")
+
+
+def generate_changelog_raw(commits):
+    """Ask the model for a changelog section and return its raw text."""
+    if not commits or not API_KEY:
+        return commits
+
+    user_msg = f"Commits:\n{commits}\n\nWrite the changelog section now."
+    raw = call_api([
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": user_msg},
+    ])
+    # The model sometimes chats back instead of writing the changelog; retry once.
+    if not extract_changelog_section(raw) or has_chatter(extract_changelog_section(raw)):
+        raw = call_api([
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_msg},
+            {"role": "assistant", "content": "Understood."},
+            {"role": "user", "content": "Output only the changelog section. No preamble, no questions."},
+        ], temperature=0.0)
+    return raw
 
 
 def generate_changelog_ai(commits):
@@ -163,34 +298,33 @@ def generate_changelog_ai(commits):
         # No API key: emit the raw commit list instead of failing the workflow.
         return commits
 
-    user_msg = f"Commits:\n{commits}\n\nWrite the changelog section now."
-    raw = call_api([
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": user_msg},
-    ])
-    section = extract_changelog_section(raw)
-
-    # The model sometimes chats back instead of writing the changelog; retry once.
-    if not section or has_chatter(section):
-        raw = call_api([
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_msg},
-            {"role": "assistant", "content": "Understood."},
-            {"role": "user", "content": "Output only the changelog section. No preamble, no questions."},
-        ], temperature=0.0)
-        section = extract_changelog_section(raw)
-
+    section = extract_changelog_section(generate_changelog_raw(commits))
     if not section:
         return commits
+    return section
 
-    # Last resort: drop any remaining prose lines that read like chatter.
-    cleaned = "\n".join(
-        l for l in section.splitlines()
-        if not l.strip() or l.strip().startswith(("- ", "* ", "#")) or not CHATTER_RE.search(l)
-    ).strip()
-    if not any(l.strip().startswith(("- ", "* ")) for l in cleaned.splitlines()):
-        return commits
-    return cleaned
+
+def get_commits_since_latest_tag():
+    """Commits since the most recent existing release tag (for a brand-new release)."""
+    tags = list_release_tags()
+    if tags:
+        return get_commits_for_range(f"{tags[-1]}..HEAD")
+    return filter_noise(git_cmd("log", "-n", "50", "--pretty=format:* %s (%h)"))
+
+
+def format_release_entry(tag, content, date_str=None):
+    content = (content or "").strip()
+    date_str = date_str or datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+    return f"## [{tag}] - {date_str}\n\n{content}\n"
+
+
+def write_changelog(entries, file_path=CHANGELOG_FILE):
+    """Write CHANGELOG.md from a list of release entries (newest first)."""
+    body = "\n\n".join(e.rstrip() for e in entries if e and e.strip())
+    content = MAIN_HEADER + (body + "\n" if body else "")
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(content)
+    return content
 
 
 def prepend_changelog_entry(title, content, file_path=CHANGELOG_FILE):
@@ -218,25 +352,85 @@ def prepend_changelog_entry(title, content, file_path=CHANGELOG_FILE):
     return True
 
 
+def rebuild_changelog(file_path=CHANGELOG_FILE, dry_run=False, cache_dir=None):
+    """Regenerate CHANGELOG.md from scratch, one entry per release tag (newest first).
+
+    When `cache_dir` is set, each release's raw model output is cached there and
+    reused on later runs (handy for iterating on the sanitizer without re-calling
+    the API).
+    """
+    tags = list_release_tags()
+    if not tags:
+        print("No release tags found; nothing to rebuild.")
+        return []
+
+    if cache_dir:
+        os.makedirs(cache_dir, exist_ok=True)
+
+    entries = []
+    for tag in reversed(tags):
+        commits = get_commits_for_release(tag)
+        cache_file = os.path.join(cache_dir, f"{tag}.txt") if cache_dir else None
+        try:
+            if cache_file and os.path.exists(cache_file):
+                with open(cache_file, "r", encoding="utf-8") as f:
+                    raw = f.read()
+            else:
+                raw = generate_changelog_raw(commits)
+                if cache_file:
+                    with open(cache_file, "w", encoding="utf-8") as f:
+                        f.write(raw)
+            notes = extract_changelog_section(raw) or (commits or "* No changes recorded.")
+        except Exception as err:  # never abort the whole rebuild on one bad release
+            print(f"  {tag}: AI failed ({err}); using raw commit list")
+            notes = commits or "* No changes recorded."
+        entries.append(format_release_entry(tag, notes, tag_date(tag)))
+        print(f"  {tag}: {len(commits.splitlines())} commits -> {len(notes.splitlines())} lines")
+
+    if not dry_run:
+        write_changelog(entries, file_path)
+    return entries
+
+
 def run_self_test():
     # 1. Test fence cleaner
     raw_md = "```markdown\n### Features\n* Test (abc1234)\n```"
     assert clean_markdown_fences(raw_md) == "### Features\n* Test (abc1234)", "Failed fence stripping"
     assert clean_markdown_fences("```\n### Fixes\n* x\n```") == "### Fixes\n* x", "Failed bare fence stripping"
 
-    # 2. Test noise filter
-    noisy = "* feat: a (aaa1111)\n* docs(changelog): update CHANGELOG.md [skip ci] (bbb2222)\n* fix: b (ccc3333)"
+    # 2. Test noise filter (changelog commits and version bumps are noise)
+    noisy = (
+        "* feat: a (aaa1111)\n"
+        "* docs(changelog): update CHANGELOG.md [skip ci] (bbb2222)\n"
+        "* chore(release): bump version to 1.3.0 (ddd4444)\n"
+        "* fix: b (ccc3333)"
+    )
     assert filter_noise(noisy) == "* feat: a (aaa1111)\n* fix: b (ccc3333)", "Failed noise filter"
 
-    # 3. Test section extraction drops model preamble and trailing chatter
+    # 3. Test sanitizer drops model preamble, chatter, fences, and stray headings
     chatty = (
-        "What would you like me to do?\n\n## Changelog\n\n## Features\n"
-        "- **a:** b (abc1234)\n\n---\n\nLet me know if you want another format.\n"
+        "What would you like me to do?\n\n## Changelog\n\n## [Unreleased]\n\n"
+        "### Added\n- **a:** b (abc1234)\n\n---\n\n"
+        "If your changelog uses another convention:\n\n"
+        "```markdown\n## [1.2.1]\n- x\n```\n\nLet me know which format you prefer.\n"
     )
-    assert extract_changelog_section(chatty) == "## Features\n- **a:** b (abc1234)", "Failed chatter trim"
+    assert extract_changelog_section(chatty) == "### Added\n- **a:** b (abc1234)", "Failed sanitize"
+    # Non-canonical headings are normalized; bullets before a heading get a section.
+    mixed = "## Features\n- f (1)\n## Fixes\n- x (2)\n## Fixes\n- y (3)\n- orphan (4)"
+    assert extract_changelog_section(mixed) == (
+        "### Added\n- f (1)\n\n### Fixed\n- x (2)\n- y (3)\n- orphan (4)"
+    ), "Failed heading normalization"
+    # Meta-notes to the user are dropped, and empty sections are pruned.
+    meta = (
+        "### Fixed\n- **player:** real fix ([0f816a4])\n"
+        "- **Format:** tell me and I'll reformat.\n"
+        "- **Version:** I used `[Unreleased]`; swap the heading if needed.\n"
+    )
+    assert extract_changelog_section(meta) == "### Fixed\n- **player:** real fix ([0f816a4])", "Failed meta drop"
     assert extract_changelog_section("Just prose, no bullets.") == "", "Should reject bullet-less output"
-    assert has_chatter("## Features\n- a (1)\nTell me which format you prefer."), "has_chatter missed prose"
-    assert not has_chatter("## Features\n- **a:** b (abc1234)"), "has_chatter false positive"
+    assert strip_code_fences("a\n```\ncode\n```\nb") == "a\nb", "Failed fence removal"
+    assert has_chatter("### Added\n- a (1)\nTell me which format you prefer."), "has_chatter missed prose"
+    assert not has_chatter("### Added\n- **a:** b (abc1234)"), "has_chatter false positive"
 
     # 4. Test changelog prepend
     tmp_path = ".tmp_changelog_test.md"
@@ -261,14 +455,48 @@ def run_self_test():
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
 
+    # 5. Test changelog rebuild writes releases newest-first
+    tmp_path = ".tmp_changelog_rebuild.md"
+    try:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        entries = [
+            format_release_entry("v1.1.0", "### Added\n- new", "2026-01-02"),
+            format_release_entry("v1.0.0", "### Added\n- first", "2026-01-01"),
+        ]
+        write_changelog(entries, tmp_path)
+        with open(tmp_path, "r", encoding="utf-8") as f:
+            text = f.read()
+        assert text.startswith("# Changelog\n\n## [v1.1.0] - 2026-01-02"), "Rebuild header/order broken"
+        assert text.index("## [v1.1.0]") < text.index("## [v1.0.0]"), "Releases not newest-first"
+        assert text.rstrip().endswith("- first"), "Oldest release should be last"
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
     print("self-test: OK")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Auto generate changelog using AI")
-    parser.add_argument("--push", nargs="?", const="", help="Push mode with optional rev range (e.g. before..sha)")
-    parser.add_argument("--release", help="Release mode with tag name (e.g. v1.3.0)")
+    parser = argparse.ArgumentParser(description="Generate release-based changelog using AI")
+    parser.add_argument(
+        "--release",
+        nargs="?",
+        const="",
+        help="Release mode: regenerate the entry for a tag (e.g. v1.3.0). "
+        "Use without a value to pick up the latest tag.",
+    )
     parser.add_argument("--output", help="Save generated notes to output file (e.g. release-notes.md)")
+    parser.add_argument(
+        "--rebuild",
+        action="store_true",
+        help="Rebuild CHANGELOG.md from scratch, one entry per release tag (newest first).",
+    )
+    parser.add_argument(
+        "--cache-dir",
+        help="With --rebuild: cache each release's raw model output here and reuse it "
+        "(speeds up iterating on the sanitizer).",
+    )
     parser.add_argument("--test", action="store_true", help="Run self test")
     args = parser.parse_args()
 
@@ -276,27 +504,37 @@ def main():
         run_self_test()
         sys.exit(0)
 
-    if args.release:
-        tag = args.release
-        commits = get_commits_since_last_tag()
-        notes = generate_changelog_ai(commits)
-        if args.output:
-            with open(args.output, "w", encoding="utf-8") as f:
-                f.write(notes + "\n")
-        prepend_changelog_entry(tag, notes)
-        print(f"Changelog updated for release {tag}")
+    if args.rebuild:
+        print(f"Rebuilding {CHANGELOG_FILE} from {len(list_release_tags())} releases...")
+        entries = rebuild_changelog(cache_dir=args.cache_dir)
+        print(f"Rebuilt {CHANGELOG_FILE} with {len(entries)} release entries.")
         sys.exit(0)
 
-    if args.push is not None:
-        rev_range = args.push if args.push else None
-        commits = get_commits_for_range(rev_range)
-        short_sha = git_cmd("rev-parse", "--short", "HEAD") or "push"
+    if args.release is not None:
+        tag = args.release.strip()
+        if not tag:
+            tags = list_release_tags()
+            if not tags:
+                print("No release tags found; nothing to do.")
+                sys.exit(0)
+            tag = tags[-1]
+        commits = get_commits_for_release(tag)
         notes = generate_changelog_ai(commits)
-        prepend_changelog_entry(short_sha, notes)
         if args.output:
             with open(args.output, "w", encoding="utf-8") as f:
                 f.write(notes + "\n")
-        print(f"Changelog updated for commit {short_sha}")
+        entry = format_release_entry(tag, notes, tag_date(tag))
+        # Rebuild from tags so the file always reflects the full release history.
+        existing = ""
+        if os.path.exists(CHANGELOG_FILE):
+            with open(CHANGELOG_FILE, "r", encoding="utf-8") as f:
+                existing = f.read()
+        if re.search(rf"^##\s*\[{re.escape(tag)}\]", existing, re.MULTILINE):
+            print(f"Changelog already contains {tag}; leaving it unchanged.")
+            sys.exit(0)
+        body = existing[len("# Changelog"):].lstrip("\n") if existing.startswith("# Changelog") else existing
+        write_changelog([entry, body.strip()] if body.strip() else [entry])
+        print(f"Changelog updated for release {tag}")
         sys.exit(0)
 
     parser.print_help()

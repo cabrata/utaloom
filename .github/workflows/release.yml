@@ -93,11 +93,15 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           AI_MODEL: ${{ secrets.AI_MODEL }}
         run: |
-          python3 scripts/changelog.py --release "${{ needs.version.outputs.tag }}" --output release-notes.md || true
+          TAG="${{ needs.version.outputs.tag }}"
+          if ! python3 scripts/changelog.py --release "$TAG" --output release-notes.md; then
+            echo "AI changelog failed; falling back to the raw commit list."
+            { echo "## What's Changed"; git log -n 20 --pretty='- %s (%h)'; } > release-notes.md
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add CHANGELOG.md
-          git diff --staged --quiet || (git commit -m "docs(changelog): update CHANGELOG.md for ${{ needs.version.outputs.tag }} [skip ci]" && git push)
+          git diff --staged --quiet || (git commit -m "docs(changelog): update CHANGELOG.md for $TAG [skip ci]" && git push)
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.version.outputs.tag }}
