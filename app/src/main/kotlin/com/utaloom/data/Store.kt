@@ -91,6 +91,33 @@ data class Settings(
     val lyricsDisabled: Set<String> = setOf("LyricsPlus"),
     val lyricsTextSize: Int = 26,
     val minimizeToTray: Boolean = true,
+    val equalizerEnabled: Boolean = false,
+    val equalizerPreset: String = "Flat",
+    val equalizerPreamp: Float = 0f,
+    val equalizerBands: List<Float> = List(10) { 0f },
+    val crossfadeSeconds: Int = 0,
+    val gaplessPlayback: Boolean = false,
+    val skipSilence: Boolean = false,
+    val playbackSpeed: Float = 1f,
+    val playbackPitch: Int = 0,
+    val lastFmEnabled: Boolean = false,
+    val lastFmApiKey: String = "",
+    val lastFmSecret: String = "",
+    val lastFmSessionKey: String = "",
+    val lastFmUsername: String = "",
+    val listenBrainzEnabled: Boolean = false,
+    val listenBrainzToken: String = "",
+    val discordEnabled: Boolean = false,
+    val discordApplicationId: String = "",
+    val lyricsRomanize: Boolean = false,
+    val lyricsRomanizationLanguage: String = "auto", // auto | ja | ko | zh
+    val lyricsTranslate: Boolean = false,
+    val lyricsTargetLanguage: String = "ID",
+    val lyricsTranslationKey: String = "",
+    val lyricsTranslationProvider: String = "deepl",
+    val miniPlayerAlwaysOnTop: Boolean = true,
+    val globalHotkeysEnabled: Boolean = false,
+    val globalHotkeys: Map<String, String> = defaultGlobalHotkeys,
 ) {
     internal fun normalizeLegacyLtServerUrl() =
         if (ltServerUrl.trim() == "wss://metrolist.caliph.dev/ws") copy(ltServerUrl = "wss://utaloom.caliph.dev/ws") else this
@@ -99,6 +126,16 @@ data class Settings(
     val lyricsProviderOrder get() = lyricsOrder.filter { it in LyricsRepository.providers } + LyricsRepository.providers.filter { it !in lyricsOrder }
     val lyricsProviders get() = lyricsProviderOrder.filter { it !in lyricsDisabled }
 }
+
+val defaultGlobalHotkeys = linkedMapOf(
+    "playPause" to "Ctrl+Alt+Space",
+    "next" to "Ctrl+Alt+Right",
+    "previous" to "Ctrl+Alt+Left",
+    "volumeUp" to "Ctrl+Alt+Up",
+    "volumeDown" to "Ctrl+Alt+Down",
+    "show" to "Ctrl+Alt+U",
+    "miniPlayer" to "Ctrl+Alt+M",
+)
 
 @Serializable
 data class PersistedQueue(val songs: List<Song> = emptyList(), val index: Int = 0, val positionMs: Long = 0, val title: String? = null)
@@ -115,6 +152,9 @@ data class LibraryState(
     val playCounts: Map<String, Int> = emptyMap(),
     val downloaded: Map<String, String> = emptyMap(), // songId -> absolute file path
     val downloadedSongs: Map<String, Song> = emptyMap(),
+    val listenedMsBySong: Map<String, Long> = emptyMap(),
+    val listeningByDay: Map<String, Long> = emptyMap(), // ISO local date -> actual listening milliseconds
+    val songCatalog: Map<String, Song> = emptyMap(),
 )
 
 @Serializable
@@ -138,12 +178,18 @@ class JsonStore<T>(private val file: File, initial: () -> T, private val seriali
     val value: T get() = _state.value
 
     init {
-        _state.drop(1).debounce(400).onEach { save(it) }.launchIn(scope)
+        _state.drop(1).debounce(400).onEach {
+            runCatching { flush() }.onFailure { System.err.println("Couldn't save ${file.name}: ${it.message}") }
+        }.launchIn(scope)
     }
 
     fun update(block: (T) -> T) = _state.update(block)
 
-    fun flush() = save(_state.value)
+    @Synchronized
+    fun flush() {
+        // Read the live state inside the write lock so a pending debounce cannot overwrite a restore.
+        save(_state.value)
+    }
 
     @Synchronized
     private fun save(value: T) {
@@ -151,11 +197,11 @@ class JsonStore<T>(private val file: File, initial: () -> T, private val seriali
         tmp.writeText(json.encodeToString(serializer, value))
         // Settings can contain a YouTube cookie: keep it owner-only on POSIX systems.
         runCatching { java.nio.file.Files.setPosixFilePermissions(tmp.toPath(), java.nio.file.attribute.PosixFilePermissions.fromString("rw-------")) }
-        runCatching {
+        try {
             java.nio.file.Files.move(tmp.toPath(), file.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE)
-        }.recoverCatching {
+        } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
             java.nio.file.Files.move(tmp.toPath(), file.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
-        }.onFailure { System.err.println("Couldn't save ${file.name}: ${it.message}") }
+        }
     }
 
     companion object {
@@ -197,11 +243,30 @@ object Library {
             s.copy(
                 history = (listOf(song) + s.history.filterNot { it.id == song.id }).take(1000),
                 playCounts = s.playCounts + (song.id to (s.playCounts[song.id] ?: 0) + 1),
+                songCatalog = s.songCatalog + (song.id to song),
             )
         }
     }
 
     fun clearHistory() = store.update { it.copy(history = emptyList()) }
+
+    /** Player supplies elapsed actively playing time, never seek position or track duration. */
+    fun recordListening(song: Song, elapsedMs: Long) {
+        if (elapsedMs <= 0 || Stores.settings.value.pauseHistory) return
+        val day = java.time.LocalDate.now().toString()
+        fun add(old: Long) = if (old > Long.MAX_VALUE - elapsedMs) Long.MAX_VALUE else old + elapsedMs
+        store.update { s ->
+            if (Stores.settings.value.pauseHistory) s else s.copy(
+                listenedMsBySong = s.listenedMsBySong + (song.id to add(s.listenedMsBySong[song.id] ?: 0)),
+                listeningByDay = s.listeningByDay + (day to add(s.listeningByDay[day] ?: 0)),
+                songCatalog = s.songCatalog + (song.id to song),
+            )
+        }
+    }
+
+    fun clearListeningHistory() = store.update {
+        it.copy(history = emptyList(), playCounts = emptyMap(), listenedMsBySong = emptyMap(), listeningByDay = emptyMap(), songCatalog = emptyMap())
+    }
 
     fun addSearch(q: String) {
         if (Stores.settings.value.pauseSearchHistory || q.isBlank()) return

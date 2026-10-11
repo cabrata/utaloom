@@ -10,11 +10,17 @@ import com.utaloom.data.PlaylistImports
 import com.utaloom.data.Stores
 import com.utaloom.platform.Mpris
 import com.utaloom.platform.NativeLibs
+import com.utaloom.platform.DesktopWindows
+import com.utaloom.platform.DiscordPresence
+import com.utaloom.platform.GlobalHotkeys
+import com.utaloom.platform.Scrobbling
+import com.utaloom.data.ListeningStats
 import com.utaloom.playback.Player
 import com.utaloom.together.ListenTogether
 import com.utaloom.ui.Nav
 import com.utaloom.ui.UtaloomApp
 import com.utaloom.ui.applySession
+import com.utaloom.ui.MiniPlayer
 
 fun main() = runApp(exitProcessOnExit = true)
 
@@ -22,10 +28,18 @@ internal fun runApp(exitProcessOnExit: Boolean) {
     applySession()
     val vlcError = NativeLibs.discoverVlc()
     if (vlcError == null) Player.init() else System.err.println(vlcError)
-    Runtime.getRuntime().addShutdownHook(Thread { PlaylistImports.cancel(); Mpris.stop(); Player.release(); Stores.flushAll() })
+    Scrobbling.start()
+    DiscordPresence.start()
+    ListeningStats.start()
+    Runtime.getRuntime().addShutdownHook(Thread {
+        PlaylistImports.cancel(); GlobalHotkeys.stop(); Scrobbling.stop(); DiscordPresence.stop(); ListeningStats.stop()
+        Mpris.stop(); Player.release(); Stores.flushAll()
+    })
     application(exitProcessOnExit = exitProcessOnExit) {
         var visible by remember { mutableStateOf(true) }
         val settings by Stores.settings.state.collectAsState()
+        val miniVisible by DesktopWindows.miniVisible.collectAsState()
+        val miniState = rememberWindowState(size = DpSize(380.dp, 320.dp))
         val windowState = rememberWindowState(size = DpSize(1280.dp, 820.dp))
         var previousPlacement by remember { mutableStateOf(WindowPlacement.Floating) }
         // Restoring bounds needs the outer rectangle: a request made while the window is still undecorated
@@ -97,13 +111,27 @@ internal fun runApp(exitProcessOnExit: Boolean) {
                         if (e is PlaylistImports.Done) Notification.Type.Info else Notification.Type.Error))
             }
         }
-        fun quit() { PlaylistImports.cancel(); ListenTogether.leaveRoom(); Mpris.stop(); Player.release(); Stores.flushAll(); exitApplication() }
+        fun showMain() {
+            visible = true
+            windowState.isMinimized = false
+            awtWindow?.toFront()
+            awtWindow?.requestFocus()
+        }
+        fun quit() {
+            PlaylistImports.cancel(); ListenTogether.leaveRoom(); GlobalHotkeys.stop(); Scrobbling.stop()
+            DiscordPresence.stop(); ListeningStats.stop(); DesktopWindows.closeMini()
+            Mpris.stop(); Player.release(); Stores.flushAll(); exitApplication()
+        }
         DisposableEffect(Unit) {
             Mpris.start(
-                onRaise = { javax.swing.SwingUtilities.invokeLater { visible = true } },
+                onRaise = { javax.swing.SwingUtilities.invokeLater { showMain() } },
                 onQuit = { javax.swing.SwingUtilities.invokeLater { quit() } },
             )
-            onDispose { Mpris.stop() }
+            GlobalHotkeys.start(
+                onShow = { javax.swing.SwingUtilities.invokeLater { showMain() } },
+                onMiniPlayer = DesktopWindows::showMini,
+            )
+            onDispose { GlobalHotkeys.stop(); Mpris.stop() }
         }
 
         if (isTraySupported) Tray(icon, state = trayState, tooltip = importing?.let { p -> if (p.total == 0) "Utaloom: importing playlist…" else "Utaloom: importing ${p.done} / ${p.total}" }
@@ -114,6 +142,7 @@ internal fun runApp(exitProcessOnExit: Boolean) {
             if (importing != null) { Separator(); Item("Cancel playlist import", onClick = PlaylistImports::cancel) }
             Separator()
             Item("Show Utaloom", onClick = { visible = true })
+            Item("Mini player", onClick = DesktopWindows::showMini)
             Item("Quit", onClick = ::quit)
         })
 
@@ -201,12 +230,23 @@ internal fun runApp(exitProcessOnExit: Boolean) {
             }
             UtaloomApp(vlcError, fullscreen, ::setFullscreen)
         }
+        if (miniVisible) Window(
+            onCloseRequest = DesktopWindows::closeMini,
+            state = miniState,
+            title = "Utaloom Mini player",
+            icon = icon,
+            alwaysOnTop = settings.miniPlayerAlwaysOnTop,
+            onKeyEvent = ::shortcut,
+        ) {
+            window.minimumSize = java.awt.Dimension(340, 310)
+            MiniPlayer(::showMain)
+        }
     }
 }
 
 private val isLinux = System.getProperty("os.name").orEmpty().lowercase().contains("linux")
 
-/** Global media shortcuts. Ignored while typing in a text field (those consume the events first). */
+/** Focused-window shortcuts. System-wide shortcuts are registered separately by GlobalHotkeys. */
 private fun shortcut(e: KeyEvent): Boolean {
     if (e.type != KeyEventType.KeyDown) return false
     val ctrl = e.isCtrlPressed || e.isMetaPressed

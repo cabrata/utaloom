@@ -4,8 +4,11 @@ import uk.co.caprica.vlcj.factory.MediaPlayerFactory
 import uk.co.caprica.vlcj.player.base.MediaPlayer
 import uk.co.caprica.vlcj.player.base.MediaPlayerEventAdapter
 
-fun createAudioEngine(): AudioEngine {
-    val options = listOf("--no-video", "--network-caching=1500") + if (System.getenv("UTALOOM_DEBUG") == null) listOf("--quiet") else listOf("--verbose=1")
+fun createAudioEngine(pitch: Int = 0): AudioEngine {
+    val pitchOptions = if (pitch != 0) listOf("--audio-filter=scaletempo_pitch", "--pitch-shift=$pitch") else emptyList()
+    val options = listOf("--no-video", "--network-caching=1500") +
+        (if (System.getenv("UTALOOM_DEBUG") == null) listOf("--quiet") else listOf("--verbose=1")) +
+        pitchOptions
     val factory = MediaPlayerFactory(*options.toTypedArray())
     return try {
         DesktopAudioEngine(factory, factory.mediaPlayers().newMediaPlayer())
@@ -44,6 +47,20 @@ private class DesktopAudioEngine(private val factory: MediaPlayerFactory, privat
     override fun seek(positionMs: Long) { player.controls().setTime(positionMs) }
     override fun stop() { player.controls().stop() }
     override fun setVolume(volume: Int) { player.audio().setVolume(volume) }
+    override fun setRate(rate: Float) { player.controls().setRate(rate) }
+
+    override fun setEqualizer(enabled: Boolean, preamp: Float, bands: List<Float>) {
+        if (!enabled) {
+            player.audio().setEqualizer(null)
+            return
+        }
+        val eq = factory.equalizer().newEqualizer()
+        eq.setPreamp(preamp.coerceIn(-20f, 20f))
+        bands.take(10).forEachIndexed { i, gain ->
+            eq.setAmp(i, gain.coerceIn(-20f, 20f))
+        }
+        player.audio().setEqualizer(eq)
+    }
 
     override fun load(url: String, headers: Map<String, String>, startPaused: Boolean): Boolean {
         // ponytail: VLC supports User-Agent and Referer options, add a custom HTTP layer if other headers are required.

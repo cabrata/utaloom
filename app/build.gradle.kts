@@ -33,6 +33,8 @@ dependencies {
     implementation(libs.protobuf.kotlin)
     implementation(libs.dbus.core)
     implementation(libs.dbus.transport)
+    implementation(libs.kuromoji.ipadic)
+    implementation(libs.tinypinyin)
     testImplementation(libs.junit)
 }
 

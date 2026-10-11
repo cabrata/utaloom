@@ -23,6 +23,9 @@ import com.utaloom.data.Song
 import com.utaloom.data.Stores
 import com.utaloom.data.toSong
 import com.utaloom.data.PlaylistImports
+import com.utaloom.data.FilePlaylist
+import com.utaloom.data.FilePlaylistImport
+import com.utaloom.data.RemoteImport
 import com.utaloom.playback.Downloads
 import com.utaloom.playback.Player
 import com.utaloom.innertube.YouTube
@@ -30,11 +33,14 @@ import com.utaloom.innertube.models.SongItem
 import com.utaloom.innertube.models.YTItem
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import java.util.Locale
 import com.utaloom.platform.readPlaylistText
+import com.utaloom.platform.readPlaylistSource
 import com.utaloom.platform.writePlaylistText
 
 private val playlistJson = Json { ignoreUnknownKeys = true; prettyPrint = true; encodeDefaults = true }
@@ -70,7 +76,7 @@ private suspend fun exportPlaylist(p: LocalPlaylist): Boolean =
     writePlaylistText(p.name, playlistJson.encodeToString(LocalPlaylist.serializer(), p))
 
 private fun knownSongs(lib: LibraryState): List<Song> =
-    (lib.history + lib.liked + lib.playlists.flatMap { it.songs } + lib.downloadedSongs.values + Stores.queue.value.songs).distinctBy { it.id }
+    (lib.history + lib.liked + lib.playlists.flatMap { it.songs } + lib.downloadedSongs.values + lib.songCatalog.values + Stores.queue.value.songs).distinctBy { it.id }
 
 private fun downloadedSongs(lib: LibraryState): List<Song> {
     val known = knownSongs(lib).associateBy { it.id }
@@ -160,6 +166,7 @@ fun LibraryScreen() {
     var fileBusy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var linkImport by remember { mutableStateOf(false) }
+    var fileImport by remember { mutableStateOf(false) }
     val importing by PlaylistImports.progress.collectAsState()
     val scope = rememberCoroutineScope()
     @Composable
@@ -174,6 +181,7 @@ fun LibraryScreen() {
                 finally { fileBusy = false }
             }
         }, enabled = !fileBusy) { Text(if (fileBusy) "Importing…" else "Import JSON") }
+        TextButton({ fileImport = true }, enabled = !fileBusy) { Text("Import Spotify CSV / M3U") }
         TextButton({ linkImport = true }) { Text(if (importing != null) "Importing…" else "Import from Spotify / YT Music") }
     }
     @Composable
@@ -200,6 +208,7 @@ fun LibraryScreen() {
                 OutlinedButton({ Nav.go(Screen.SongList("Listening history", "history")) }) { Text("History (${lib.history.size})") }
                 OutlinedButton({ Nav.go(Screen.SongList("Downloads", "downloads")) }) { Text("Downloads (${lib.downloaded.size})") }
                 TextButton({ Nav.go(Screen.SongList("Most played", "top")) }) { Text("Most played") }
+                TextButton({ Nav.go(Screen.Statistics) }) { Text("Statistics") }
             }
         }
         item {
@@ -233,6 +242,7 @@ fun LibraryScreen() {
     }
     if (create) PlaylistNameDialog("New playlist", onDismiss = { create = false }) { Nav.go(Screen.LocalPlaylist(Library.createPlaylist(it))) }
     if (linkImport) LinkImportDialog { linkImport = false }
+    if (fileImport) FileImportDialog({ fileImport = false }) { p -> Nav.go(Screen.LocalPlaylist(Library.createPlaylist(p.name, p.songs))) }
     imported?.let { p -> AlertDialog(onDismissRequest = { imported = null }, title = { Text("Import ${p.name}?") },
         text = { Text("Create a new local playlist with ${p.songs.size} songs. Existing playlists will not be changed.") },
         confirmButton = { TextButton({ Nav.go(Screen.LocalPlaylist(Library.createPlaylist(p.name, p.songs))); imported = null }) { Text("Import") } },
@@ -341,8 +351,8 @@ fun SongListScreen(title: String, kind: String) {
         itemsIndexed(shown, key = { _, song -> song.id }) { i, song -> SongRow(song, { Player.playQueue(shown, i, title) }, playing = player.current?.id == song.id,
             trailing = { if (kind == "top") Text("${lib.playCounts[song.id] ?: 0} plays", style = MaterialTheme.typography.bodySmall) }) }
     }
-    if (clear) LibraryConfirm("Clear listening history?", "All locally recorded history and play counts will be removed. Liked songs and playlists are kept.", { clear = false }) {
-        Stores.library.update { it.copy(history = emptyList(), playCounts = emptyMap()) }
+    if (clear) LibraryConfirm("Clear listening history?", "All locally recorded history, play counts and listening statistics will be removed. Liked songs and playlists are kept.", { clear = false }) {
+        Library.clearListeningHistory()
     }
 }
 
@@ -361,6 +371,7 @@ fun LocalPlaylistScreen(id: String) {
     var imported by remember { mutableStateOf<LocalPlaylist?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
     var fileBusy by remember { mutableStateOf(false) }
+    var fileImport by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     if (playlist == null) return EmptyBox("This local playlist no longer exists.")
     val shown = visibleSongs(playlist.songs, query, sort, settings.hideExplicit)
@@ -390,6 +401,7 @@ fun LocalPlaylistScreen(id: String) {
                     finally { fileBusy = false }
                 }
             }, enabled = !fileBusy) { Text("Import songs") }
+            TextButton({ fileImport = true }, enabled = !fileBusy) { Text("Import CSV / M3U") }
             TextButton({ delete = true }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
         }
         }
@@ -419,6 +431,7 @@ fun LocalPlaylistScreen(id: String) {
     }
     remove?.let { song -> LibraryConfirm("Remove song?", "Remove ${song.title} from ${playlist.name}?", { remove = null }) { Library.removeFromPlaylist(id, song.id) } }
     if (add) AddPlaylistSongsDialog(id) { add = false }
+    if (fileImport) FileImportDialog({ fileImport = false }) { p -> Library.addToPlaylist(id, p.songs) }
     imported?.let { p -> AlertDialog(onDismissRequest = { imported = null }, title = { Text("Add songs from ${p.name}?") },
         text = { Text("Add ${p.songs.count { s -> playlist.songs.none { it.id == s.id } }} new songs to ${playlist.name}. Existing songs and their order will be kept.") },
         confirmButton = { TextButton({ Library.addToPlaylist(id, p.songs); imported = null }) { Text("Add songs") } },
@@ -466,6 +479,80 @@ private fun AddPlaylistSongsDialog(id: String, onDismiss: () -> Unit) {
         }
     }, confirmButton = { TextButton({ Library.addToPlaylist(id, (knownSongs(lib) + results).distinctBy { it.id }.filter { it.id in selected }); onDismiss() }, enabled = selected.isNotEmpty()) { Text("Add ${selected.size} songs") } },
         dismissButton = { TextButton(onDismiss) { Text("Cancel") } })
+}
+
+@Composable
+private fun FileImportDialog(onDismiss: () -> Unit, onImport: (LocalPlaylist) -> Unit) {
+    val scope = rememberCoroutineScope()
+    var source by remember { mutableStateOf<FilePlaylist?>(null) }
+    var result by remember { mutableStateOf<RemoteImport?>(null) }
+    var name by remember { mutableStateOf("") }
+    var progress by remember { mutableStateOf<PlaylistImports.Progress?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var job by remember { mutableStateOf<Job?>(null) }
+    fun dismiss() { job?.cancel(); onDismiss() }
+    DisposableEffect(Unit) { onDispose { job?.cancel() } }
+    AlertDialog(onDismissRequest = { dismiss() }, title = { Text("Import Spotify CSV / M3U") }, text = {
+        Column(Modifier.widthIn(max = 520.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Choose an Exportify-style Spotify CSV or a UTF-8 M3U with YouTube video links only. Other URLs and local paths are rejected, never opened. Files are limited to 10 MiB / 20,000 tracks.", style = MaterialTheme.typography.bodySmall)
+            OutlinedButton({
+                busy = true
+                error = null
+                result = null
+                source = null
+                job = scope.launch {
+                    try {
+                        val file = readPlaylistSource(FilePlaylistImport.MAX_BYTES)
+                        if (file != null) {
+                            val parsed = withContext(Dispatchers.Default) { FilePlaylistImport.parse(file.text, "${file.name}.${file.extension}") }
+                            source = parsed
+                            name = parsed.name
+                        }
+                    } catch (e: CancellationException) { throw e }
+                    catch (e: Exception) { error = (e as? IllegalArgumentException)?.message ?: "Could not read this UTF-8 playlist file." }
+                    finally { busy = false }
+                }
+            }, enabled = !busy) { Text("Choose file") }
+            source?.let { file ->
+                OutlinedTextField(name, { name = it }, Modifier.fillMaxWidth(), singleLine = true, enabled = !busy && result == null,
+                    label = { Text("Playlist name") }, isError = playlistNameError(name) != null,
+                    supportingText = { Text(playlistNameError(name) ?: "${file.tracks.size} tracks parsed. No library changes yet.") })
+                if (result == null && !busy) VScrollBox(Modifier.heightIn(max = 160.dp)) {
+                    Column { file.tracks.take(5).forEach { Text("${it.title}${if (it.artist.isBlank()) "" else " • ${it.artist}"}", maxLines = 2, overflow = TextOverflow.Ellipsis) } }
+                }
+            }
+            progress?.let { ImportProgress(it) }
+            if (busy && progress == null) LinearProgressIndicator(Modifier.fillMaxWidth())
+            result?.let { matched ->
+                Text("${matched.playlist.songs.size} unique matches, ${matched.missing.size} not found. Nothing is saved until you confirm below.")
+                if (matched.missing.isNotEmpty()) VScrollBox(Modifier.heightIn(max = 140.dp)) {
+                    Column { matched.missing.take(20).forEach { Text(it, maxLines = 2, style = MaterialTheme.typography.bodySmall, overflow = TextOverflow.Ellipsis) } }
+                }
+            }
+            if (source != null && result == null) Text("Matching sends track titles and artists to YouTube Music. Cancel at any time without saving a partial playlist.", style = MaterialTheme.typography.bodySmall)
+            error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        }
+    }, confirmButton = {
+        val matched = result
+        if (matched != null) TextButton({ onImport(matched.playlist); onDismiss() }, enabled = !busy && matched.playlist.songs.isNotEmpty()) { Text("Import ${matched.playlist.songs.size} songs") }
+        else TextButton({
+            val file = source ?: return@TextButton
+            busy = true
+            error = null
+            progress = PlaylistImports.Progress(0, file.tracks.size)
+            job = scope.launch {
+                try {
+                    result = FilePlaylistImport.match(file.copy(name = name.trim()), onProgress = { done, total ->
+                        scope.launch { progress = PlaylistImports.Progress(done, total) }
+                    })
+                } catch (_: TimeoutCancellationException) { error = "Matching timed out. Nothing was imported. Try again with a working connection." }
+                catch (e: CancellationException) { throw e }
+                catch (e: Exception) { error = "${(e as? IllegalArgumentException)?.message ?: "Matching failed. Check your connection."} Nothing was imported." }
+                finally { busy = false; progress = null }
+            }
+        }, enabled = !busy && source != null && playlistNameError(name) == null) { Text("Match on YouTube Music") }
+    }, dismissButton = { TextButton({ dismiss() }) { Text("Cancel") } })
 }
 
 @Composable

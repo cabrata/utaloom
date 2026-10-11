@@ -6,6 +6,7 @@ import com.utaloom.data.PersistedQueue
 import com.utaloom.data.Song
 import com.utaloom.data.Stores
 import com.utaloom.platform.NativeLibs
+import com.utaloom.platform.DesktopWindows
 import com.utaloom.playback.Player
 import com.utaloom.ui.Nav
 import com.utaloom.ui.Screen
@@ -150,6 +151,26 @@ class FullscreenTest {
             key(KeyEvent.VK_F11)
             check(onEdt { w.placement == WindowPlacement.Floating }) { "No current song must not enter fullscreen" }
             println("PASS: stopping exits fullscreen; no current song cannot enter it")
+            val stopped = Player.state.value
+            DesktopWindows.showMini()
+            var mini: ComposeWindow? = null
+            await("Mini player window") { onEdt {
+                Window.getWindows().filterIsInstance<ComposeWindow>().firstOrNull { it.isShowing && it.title == "Utaloom Mini player" }?.also { mini = it } != null
+            } }
+            val smallPlayer = checkNotNull(mini)
+            onEdt { smallPlayer.renderImmediately() }
+            await("Mini player is always on top") { onEdt { smallPlayer.isAlwaysOnTop } }
+            click(smallPlayer, "Always on top")
+            await("Pin toggles native always-on-top") { onEdt { !smallPlayer.isAlwaysOnTop } }
+            check(!Stores.settings.value.miniPlayerAlwaysOnTop)
+            click(smallPlayer, "Always on top")
+            await("Pin restores native always-on-top") { onEdt { smallPlayer.isAlwaysOnTop } }
+            click(smallPlayer, "Show Utaloom")
+            check(Player.state.value == stopped) { "Mini player visibility/pin changes must not change playback or the queue" }
+            onEdt { smallPlayer.dispatchEvent(WindowEvent(smallPlayer, WindowEvent.WINDOW_CLOSING)) }
+            await("Closing mini leaves main window alive") { onEdt { !smallPlayer.isShowing && w.isShowing } }
+            check(Player.state.value == stopped) { "Closing the mini player must not stop or reset playback" }
+            println("PASS: mini window opens, pin changes native placement, show-main works and close preserves shared player")
         } catch (e: Exception) {
             System.getenv("UTALOOM_WM_ARTIFACTS")?.let { dir -> runCatching { javax.imageio.ImageIO.write(Robot().createScreenCapture(java.awt.Rectangle(java.awt.Toolkit.getDefaultToolkit().screenSize)), "png", java.io.File(dir, "failure.png")) } }
             println(onEdt { window?.let { "placement=${it.placement}, bounds=${it.bounds}, focused=${it.isFocused}, focusOwner=${it.focusOwner}, insets=${it.insets}, client=${clientSize(it)}" } })

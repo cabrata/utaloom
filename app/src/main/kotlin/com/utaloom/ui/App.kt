@@ -64,7 +64,7 @@ fun applySession() {
 private enum class Panel { NONE, QUEUE, LYRICS }
 
 @Composable
-fun UtaloomApp(vlcError: String? = null, fullscreen: Boolean, onFullscreenChange: (Boolean) -> Unit) {
+fun UtaloomApp(vlcError: String? = null, fullscreen: Boolean, onFullscreenChange: (Boolean) -> Unit, onOpenMini: () -> Unit = com.utaloom.platform.DesktopWindows::showMini) {
     val settings by Stores.settings.state.collectAsState()
     val player by Player.state.collectAsState()
     val lt by ListenTogether.state.collectAsState()
@@ -169,6 +169,7 @@ fun UtaloomApp(vlcError: String? = null, fullscreen: Boolean, onFullscreenChange
                             onOpenQueue = { panel = if (panel == Panel.QUEUE) Panel.NONE else Panel.QUEUE },
                             onOpenLyrics = { panel = if (panel == Panel.LYRICS) Panel.NONE else Panel.LYRICS },
                             onFullscreen = { fullPage = PlayerPage.NOW_PLAYING; fullPlayer = true; onFullscreenChange(true) },
+                            onOpenMini = onOpenMini,
                         )
                     }
                     if (compact && !keyboardVisible) BottomNavigation()
@@ -303,6 +304,7 @@ private fun Content() {
         Screen.Library -> LibraryScreen()
         Screen.Together -> TogetherScreen()
         Screen.Settings -> SettingsScreen()
+        Screen.Stats, Screen.Statistics -> StatsScreen()
         is Screen.Search -> SearchScreen(s.query)
         is Screen.Album -> AlbumScreen(s.browseId)
         is Screen.Artist -> ArtistScreen(s.browseId)

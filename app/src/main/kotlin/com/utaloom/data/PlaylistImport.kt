@@ -5,12 +5,14 @@ import com.utaloom.innertube.models.SongItem
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -28,46 +30,77 @@ import java.time.Duration
 import kotlin.math.abs
 
 /** Result of importing a remote playlist. [missing] = tracks with no YouTube Music match, [note] = non-fatal warning. */
-data class RemoteImport(val playlist: LocalPlaylist, val missing: List<String>, val note: String? = null)
+data class RemoteImport(val playlist: LocalPlaylist, val missing: List<String>, val note: String? = null, val missingCount: Int = missing.size)
 
-/** App-wide link import that survives closing the dialog, so it can keep running in the background. One at a time. */
+/** App-wide imports survive closing the dialog. File matches are reviewed before creating a playlist. */
 object PlaylistImports {
-    data class Progress(val done: Int = 0, val total: Int = 0, val background: Boolean = false)
+    data class Progress(val done: Int = 0, val total: Int = 0, val background: Boolean = false, val awaitingConfirmation: Boolean = false, val fileImport: Boolean = false)
     sealed interface Event { val background: Boolean }
     data class Done(val playlistId: String, val name: String, val songs: Int, val missing: Int, val note: String?, override val background: Boolean) : Event
     data class Failed(val message: String, override val background: Boolean) : Event
 
     private val _progress = MutableStateFlow<Progress?>(null)
     val progress = _progress.asStateFlow()
+    private val _preview = MutableStateFlow<RemoteImport?>(null)
+    val preview = _preview.asStateFlow()
     val events = MutableSharedFlow<Event>(extraBufferCapacity = 8)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var job: Job? = null
 
-    fun start(url: String): Unit = synchronized(this) {
-        if (job?.isActive == true) return
-        _progress.value = Progress()
+    fun start(url: String): Boolean = startTask(false) { onProgress -> importRemotePlaylist(url, onProgress) }
+    fun startFile(file: FilePlaylist): Boolean = startTask(true) { onProgress -> FilePlaylistImport.match(file, onProgress) }
+
+    private fun startTask(review: Boolean, load: suspend ((Int, Int) -> Unit) -> RemoteImport): Boolean = synchronized(this) {
+        if (_progress.value != null) return false
+        _progress.value = Progress(fileImport = review)
         // LAZY so `job` is assigned before the body (and its finally) can run.
         val self = scope.launch(start = CoroutineStart.LAZY) {
             val me = coroutineContext[Job]
             fun mine() = job === me
             try {
-                val r = importRemotePlaylist(url) { d, t -> synchronized(this@PlaylistImports) { if (mine()) _progress.update { it?.copy(done = d, total = t) } } }
-                // Cancelled while matching: don't create the playlist.
-                val id = synchronized(this@PlaylistImports) { if (mine()) Library.createPlaylist(r.playlist.name, r.playlist.songs) else null } ?: return@launch
-                events.emit(Done(id, r.playlist.name, r.playlist.songs.size, r.missing.size, r.note, isBackground()))
+                val result = load { done, total -> synchronized(this@PlaylistImports) { if (mine()) _progress.update { it?.copy(done = done, total = total) } } }
+                currentCoroutineContext().ensureActive()
+                require(result.playlist.songs.isNotEmpty()) { "No songs matched. No playlist was created." }
+                synchronized(this@PlaylistImports) {
+                    if (!mine()) return@launch
+                    if (review) {
+                        _preview.value = result
+                        _progress.update { it?.copy(awaitingConfirmation = true) }
+                    } else create(result)
+                }
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) {
-                if (mine()) events.emit(Failed((e as? IllegalArgumentException)?.message ?: "Import failed. Check the link and your connection.", isBackground()))
-            } finally { synchronized(this@PlaylistImports) { if (mine()) { _progress.value = null; job = null } } }
+                synchronized(this@PlaylistImports) {
+                    if (mine()) events.tryEmit(Failed((e as? IllegalArgumentException)?.message ?: "Import failed. Check the playlist and your connection.", isBackground()))
+                }
+            } finally {
+                synchronized(this@PlaylistImports) {
+                    if (mine()) { job = null; if (_preview.value == null) _progress.value = null }
+                }
+            }
         }
         job = self
         self.start()
+        true
+    }
+
+    private fun create(result: RemoteImport) {
+        val id = Library.createPlaylist(result.playlist.name, result.playlist.songs)
+        events.tryEmit(Done(id, result.playlist.name, result.playlist.songs.size, result.missingCount, result.note, isBackground()))
+    }
+
+    fun confirm(): Boolean = synchronized(this) {
+        val result = _preview.value ?: return false
+        if (_progress.value?.awaitingConfirmation != true) return false
+        create(result)
+        _preview.value = null
+        _progress.value = null
+        true
     }
 
     private fun isBackground() = _progress.value?.background == true
     fun toBackground() = _progress.update { it?.copy(background = true) }
-    // A blocking HTTP call may still be finishing; detach it so the UI clears now and a new import can start.
-    fun cancel(): Unit = synchronized(this) { job?.cancel(); job = null; _progress.value = null }
+    fun cancel(): Unit = synchronized(this) { job?.cancel(); job = null; _preview.value = null; _progress.value = null }
 
     fun summary(e: Event) = when (e) {
         is Done -> "Imported \"${e.name}\": ${e.songs} songs" + (if (e.missing > 0) ", ${e.missing} not found on YouTube Music" else "") + (e.note?.let { ". $it" } ?: "")

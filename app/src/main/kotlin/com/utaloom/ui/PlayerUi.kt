@@ -70,7 +70,13 @@ import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Lyrics
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PictureInPictureAlt
 import androidx.compose.material.icons.filled.PlayArrow
+import com.utaloom.lyrics.LyricsTranslation
+import com.utaloom.lyrics.Romanization
+import com.utaloom.lyrics.TranslationState
+import androidx.compose.material3.AlertDialog
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
@@ -260,7 +266,13 @@ private fun GuestBadge() = Row(verticalAlignment = Alignment.CenterVertically, h
 
 /** Bottom mini player. */
 @Composable
-fun PlayerBar(onOpenFull: () -> Unit, onOpenQueue: () -> Unit, onOpenLyrics: () -> Unit, onFullscreen: () -> Unit) {
+fun PlayerBar(
+    onOpenFull: () -> Unit,
+    onOpenQueue: () -> Unit,
+    onOpenLyrics: () -> Unit,
+    onFullscreen: () -> Unit,
+    onOpenMini: () -> Unit = { com.utaloom.platform.DesktopWindows.showMini() },
+) {
     val s by Player.state.collectAsState()
     val guest = isGuest()
     val song = s.current
@@ -293,6 +305,7 @@ fun PlayerBar(onOpenFull: () -> Unit, onOpenQueue: () -> Unit, onOpenLyrics: () 
                     IconButton(onOpenLyrics, enabled = song != null) { Icon(Icons.Default.Lyrics, "Lyrics") }
                     IconButton(onOpenQueue) { Icon(Icons.AutoMirrored.Filled.QueueMusic, "Queue") }
                     VolumeControl(s)
+                    IconButton(onOpenMini) { Icon(Icons.Default.PictureInPictureAlt, "Mini player") }
                     FullscreenButton(false, onFullscreen)
                 }
             }
@@ -520,15 +533,109 @@ fun LyricsPanel(modifier: Modifier = Modifier, compact: Boolean = false) {
     }
     val fontSize = settings.lyricsTextSize.sp
     val style = LyricStyle.copy(fontSize = fontSize, lineHeight = fontSize * 1.3f)
+    val romanizedLines by produceState<List<String?>?>(
+        initialValue = null,
+        ly,
+        settings.lyricsRomanize,
+        settings.lyricsRomanizationLanguage,
+    ) {
+        value = null
+        if (!settings.lyricsRomanize) return@produceState
+        value = try {
+            Romanization.romanizeSongLines(ly.lines.map { it.text }, settings.lyricsRomanizationLanguage)
+        } catch (c: CancellationException) {
+            throw c
+        } catch (_: Exception) {
+            null
+        }
+    }
+    val translationState by LyricsTranslation.state.collectAsState()
+    val translatedLines = (translationState as? TranslationState.Success)?.takeIf { it.songId == song.id }?.lines
+    val isTranslating = (translationState as? TranslationState.Translating)?.songId == song.id
+    val translationError = (translationState as? TranslationState.Error)?.takeIf { it.songId == song.id }?.message
+    val scope = rememberCoroutineScope()
+    var showTranslateConfirm by remember { mutableStateOf(false) }
+    var localError by remember { mutableStateOf<String?>(null) }
+
+    if (showTranslateConfirm) {
+        AlertDialog(
+            onDismissRequest = { showTranslateConfirm = false },
+            title = { Text("Translate lyrics") },
+            text = {
+                Text(
+                    "Send lyrics to DeepL to translate into ${settings.lyricsTargetLanguage}? " +
+                        "This will use your personal API key and translation quota.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showTranslateConfirm = false
+                    localError = null
+                    LyricsTranslation.translate(
+                        songId = song.id,
+                        lines = ly.lines.map { it.text },
+                        targetLang = settings.lyricsTargetLanguage,
+                        apiKey = settings.lyricsTranslationKey,
+                        scope = scope,
+                    )
+                }) {
+                    Text("Translate")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showTranslateConfirm = false }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+
     Column(modifier.fillMaxSize()) {
+        val activeError = localError ?: translationError
+        if (activeError != null) {
+            Surface(
+                color = MaterialTheme.colorScheme.errorContainer,
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+            ) {
+                Row(
+                    Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(Icons.Default.Close, null, tint = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.size(16.dp))
+                    Text(activeError, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.weight(1f))
+                    TextButton(onClick = {
+                        localError = null
+                        if (translationError != null) LyricsTranslation.clear()
+                    }) {
+                        Text("Dismiss", color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
+        }
         if (!ly.synced) {
             SelectionContainer(Modifier.weight(1f)) {
                 VScrollColumn(Modifier.fillMaxSize()) {
-                    item { Text(ly.plain, Modifier.padding(horizontal = 16.dp), style = style.copy(fontWeight = FontWeight.Medium, fontSize = fontSize * 0.75f, lineHeight = fontSize)) }
+                    itemsIndexed(ly.lines) { i, line ->
+                        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                            Text(line.text, style = style.copy(fontWeight = FontWeight.Medium, fontSize = fontSize * 0.75f, lineHeight = fontSize))
+                            val rom = romanizedLines?.getOrNull(i)
+                            val trans = translatedLines?.getOrNull(i)
+                            if (!rom.isNullOrBlank()) {
+                                Spacer(Modifier.height(2.dp))
+                                Text(rom, style = style.copy(fontSize = fontSize * 0.55f, lineHeight = fontSize * 0.75f, fontWeight = FontWeight.Normal), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            if (!trans.isNullOrBlank()) {
+                                Spacer(Modifier.height(2.dp))
+                                Text(trans, style = style.copy(fontSize = fontSize * 0.55f, lineHeight = fontSize * 0.75f, fontWeight = FontWeight.Normal, fontStyle = FontStyle.Italic), color = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                    }
                 }
             }
         } else {
-            val pos = smoothPosition(s.positionMs, s.isPlaying)
+            val pos = smoothPosition(s.positionMs, s.isPlaying, settings.playbackSpeed)
             val items = remember(ly) { lyricItems(ly.lines) }
             // Focus = latest started line or gap. Background vocals never take focus, they light up with their line.
             val current = items.indexOfLast { (it.line < 0 || !ly.lines[it.line].background) && it.startMs <= pos + 300 }
@@ -562,6 +669,8 @@ fun LyricsPanel(modifier: Modifier = Modifier, compact: Boolean = false) {
                                 line, active, distance = if (current < 0) i + 1 else abs(i - current), pos = if (active) pos else 0L,
                                 style = if (line.background) style.copy(fontSize = fontSize * 0.7f, lineHeight = fontSize * 0.9f, fontStyle = FontStyle.Italic) else style,
                                 sharp = hovered || compact,
+                                romanized = romanizedLines?.getOrNull(item.line),
+                                translated = translatedLines?.getOrNull(item.line),
                                 onClick = if (guest) null else ({ Player.seekTo(line.timeMs); if (!s.isPlaying) Player.play() }),
                             )
                         }
@@ -569,20 +678,50 @@ fun LyricsPanel(modifier: Modifier = Modifier, compact: Boolean = false) {
                 }
             }
         }
-        Text("Source: ${ly.provider}", Modifier.padding(16.dp, 4.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text("Source: ${ly.provider}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (isTranslating) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Text("Translating...", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                    TextButton(onClick = { LyricsTranslation.cancel() }) {
+                        Text("Cancel", style = MaterialTheme.typography.labelSmall)
+                    }
+                } else if (translatedLines != null) {
+                    TextButton(onClick = { LyricsTranslation.clear() }) {
+                        Text("Clear translation", style = MaterialTheme.typography.labelSmall)
+                    }
+                } else {
+                    TextButton(onClick = {
+                        if (settings.lyricsTranslationKey.isBlank()) {
+                            localError = "Please enter your DeepL API key in Settings > Lyrics first."
+                        } else {
+                            showTranslateConfirm = true
+                        }
+                    }) {
+                        Text("Translate (${settings.lyricsTargetLanguage})", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
+        }
     }
 }
 
 /** VLC reports time every ~250 ms, so interpolate between reports with the frame clock for smooth word fills. */
 @Composable
-private fun smoothPosition(reported: Long, playing: Boolean): Long {
+private fun smoothPosition(reported: Long, playing: Boolean, speed: Float = 1f): Long {
     var now by remember { mutableLongStateOf(reported) }
-    LaunchedEffect(reported, playing) {
+    LaunchedEffect(reported, playing, speed) {
         now = reported
         if (!playing) return@LaunchedEffect
         // The frame clock has its own time base, so measure from the first frame.
         val base = withFrameNanos { it }
-        while (true) withFrameNanos { now = reported + (it - base) / 1_000_000 }
+        val effectiveSpeed = if (speed <= 0f) 1f else speed
+        while (true) withFrameNanos { now = reported + ((it - base) * effectiveSpeed / 1_000_000).toLong() }
     }
     return now
 }
@@ -592,7 +731,17 @@ private fun smoothPosition(reported: Long, playing: Boolean): Long {
  * with distance (sharp while hovered so they are easy to read and click). Word-synced lines fill word by word.
  */
 @Composable
-private fun LyricRow(line: LyricLine, active: Boolean, distance: Int, pos: Long, style: TextStyle, sharp: Boolean, onClick: (() -> Unit)?) {
+private fun LyricRow(
+    line: LyricLine,
+    active: Boolean,
+    distance: Int,
+    pos: Long,
+    style: TextStyle,
+    sharp: Boolean,
+    romanized: String? = null,
+    translated: String? = null,
+    onClick: (() -> Unit)?,
+) {
     val color = MaterialTheme.colorScheme.onSurface
     val d = distance.coerceAtMost(4)
     val motion = spring<Float>(dampingRatio = 0.8f, stiffness = 120f)
@@ -622,6 +771,24 @@ private fun LyricRow(line: LyricLine, active: Boolean, distance: Int, pos: Long,
                 }
             }
             else -> Text(line.text, style = style, color = color, textAlign = textAlign)
+        }
+        if (!romanized.isNullOrBlank()) {
+            Spacer(Modifier.height(3.dp))
+            Text(
+                romanized,
+                style = style.copy(fontSize = style.fontSize * 0.65f, lineHeight = style.lineHeight * 0.65f, fontWeight = FontWeight.Normal),
+                color = color.copy(alpha = if (active) 0.80f else 0.60f),
+                textAlign = textAlign,
+            )
+        }
+        if (!translated.isNullOrBlank()) {
+            Spacer(Modifier.height(3.dp))
+            Text(
+                translated,
+                style = style.copy(fontSize = style.fontSize * 0.65f, lineHeight = style.lineHeight * 0.65f, fontWeight = FontWeight.Normal, fontStyle = FontStyle.Italic),
+                color = MaterialTheme.colorScheme.primary.copy(alpha = if (active) 0.95f else 0.70f),
+                textAlign = textAlign,
+            )
         }
     }
 }

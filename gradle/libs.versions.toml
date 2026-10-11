@@ -12,6 +12,8 @@ vlcj = "4.12.1"
 protobuf = "4.36.2"
 protobufPlugin = "0.10.0"
 dbus = "5.2.2"
+kuromoji = "0.9.0"
+tinypinyin = "2.0.3"
 
 [libraries]
 innertubex-desktop = { module = "com.github.MetrolistGroup.innertubex:innertubex-desktop", version.ref = "innertubex" }
@@ -33,6 +35,8 @@ protoc = { module = "com.google.protobuf:protoc", version.ref = "protobuf" }
 dbus-core = { module = "com.github.hypfvieh:dbus-java-core", version.ref = "dbus" }
 dbus-transport = { module = "com.github.hypfvieh:dbus-java-transport-native-unixsocket", version.ref = "dbus" }
 junit = { module = "junit:junit", version = "4.13.2" }
+kuromoji-ipadic = { module = "com.atilika.kuromoji:kuromoji-ipadic", version.ref = "kuromoji" }
+tinypinyin = { module = "com.github.promeg:tinypinyin", version.ref = "tinypinyin" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
@@ -41,4 +45,3 @@ kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", versi
 compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 compose = { id = "org.jetbrains.compose", version.ref = "compose" }
 protobuf = { id = "com.google.protobuf", version.ref = "protobufPlugin" }
-

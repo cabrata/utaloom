@@ -24,6 +24,8 @@ interface AudioEngine {
     fun stop()
     /** 100 is unity gain. Player may request up to 150 when supported by the backend. */
     fun setVolume(volume: Int)
+    fun setRate(rate: Float) {}
+    fun setEqualizer(enabled: Boolean, preamp: Float, bands: List<Float>) {}
     /** Returns false if the backend rejects the media. Headers are unmodified HTTP headers. */
     fun load(url: String, headers: Map<String, String>, startPaused: Boolean): Boolean
     val time: Long

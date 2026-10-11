@@ -13,10 +13,14 @@ dependencyResolutionManagement {
     repositories {
         exclusiveContent {
             forRepository { maven("https://jitpack.io") }
-            filter { includeGroup("com.github.MetrolistGroup.innertubex") }
+            filter {
+                includeGroup("com.github.MetrolistGroup.innertubex")
+            }
         }
         mavenCentral()
         google()
+        maven("https://maven.aliyun.com/repository/public")
+        maven("https://jitpack.io")
     }
 }
 

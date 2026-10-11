@@ -156,6 +156,12 @@ fun SettingsScreen(isMobile: Boolean = System.getProperty("java.vm.name") == "Da
         item { SettingsChoice("Theme", "Follow your system or choose a fixed appearance.", s.darkMode, listOf("system" to "System", "dark" to "Dark", "light" to "Light")) { v -> Stores.settings.update { it.copy(darkMode = v) } } }
         item { SettingsToggle("Dynamic color", "Use the current track artwork for the app accent color.", s.dynamicColor) { v -> Stores.settings.update { it.copy(dynamicColor = v) } } }
         if (!isMobile) item { SettingsToggle("Minimize to tray", "Keep Utaloom running when you close its window, if a system tray is available.", s.minimizeToTray) { v -> Stores.settings.update { it.copy(minimizeToTray = v) } } }
+        if (!isMobile) item {
+            FlowRow(Modifier.padding(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(com.utaloom.platform.DesktopWindows::showMini) { Text("Open mini player") }
+            }
+            SettingsToggle("Mini player always on top", "Keep the small player above other windows. Closing it keeps your music playing.", s.miniPlayerAlwaysOnTop) { v -> Stores.settings.update { it.copy(miniPlayerAlwaysOnTop = v) } }
+        }
         item {
             Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp)) {
                 Text("Lyrics text size: ${s.lyricsTextSize} sp", style = MaterialTheme.typography.titleMedium)
@@ -163,6 +169,7 @@ fun SettingsScreen(isMobile: Boolean = System.getProperty("java.vm.name") == "Da
             }
         }
         item { HorizontalDivider(Modifier.padding(horizontal = 24.dp)); SectionTitle("Lyrics providers") }
+        if (!isMobile) item { LyricsSettings() }
         item { Text("Tried from top to bottom until one has lyrics for the song.", Modifier.padding(horizontal = 24.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         val order = s.lyricsProviderOrder
         order.forEachIndexed { i, p ->
@@ -189,6 +196,22 @@ fun SettingsScreen(isMobile: Boolean = System.getProperty("java.vm.name") == "Da
         item { SettingsChoice("Audio quality", "Applies when loading the next track. Downloads use high quality.", s.audioQuality, listOf("AUTO" to "Automatic", "HIGH" to "High", "LOW" to "Low")) { v -> Stores.settings.update { it.copy(audioQuality = v) } } }
         item { SettingsToggle("Volume normalization", "Reduce volume differences between tracks. Applies when loading the next track.", s.normalizeVolume) { v -> Stores.settings.update { it.copy(normalizeVolume = v) } } }
         item { SettingsToggle("Smart shuffle", "Mix a recommended song after every three songs while shuffling playlists and albums.", s.smartShuffle, Player::setSmartShuffle) }
+        if (!isMobile) item { PlaybackSettings() }
+        if (!isMobile) item {
+            HorizontalDivider(Modifier.padding(horizontal = 24.dp))
+            SectionTitle("Desktop shortcuts")
+            HotkeySettings()
+        }
+        if (!isMobile) item {
+            HorizontalDivider(Modifier.padding(horizontal = 24.dp))
+            SectionTitle("Integrations")
+            IntegrationSettings()
+        }
+        if (!isMobile) item {
+            HorizontalDivider(Modifier.padding(horizontal = 24.dp))
+            SectionTitle("Backup and restore")
+            BackupSettings()
+        }
         item { HorizontalDivider(Modifier.padding(horizontal = 24.dp)); SectionTitle("Content and privacy") }
         item { SettingsToggle("Hide explicit songs", "Filter explicitly marked music from supported browse, search and library views.", s.hideExplicit) { v -> Stores.settings.update { it.copy(hideExplicit = v) } } }
         item { SettingsToggle("Use account for browsing", "Use your signed-in account for supported browse requests.", s.useLoginForBrowse) { v -> YouTube.useLoginForBrowse = v; Stores.settings.update { it.copy(useLoginForBrowse = v) } } }
@@ -219,7 +242,7 @@ fun SettingsScreen(isMobile: Boolean = System.getProperty("java.vm.name") == "Da
                         Stores.settings.update { it.copy(cookie = null, dataSyncId = null, accountName = null, accountEmail = null, accountAvatar = null) }
                     }
                     "search" -> Stores.library.update { it.copy(searchHistory = emptyList()) }
-                    else -> Stores.library.update { it.copy(history = emptyList(), playCounts = emptyMap()) }
+                    else -> com.utaloom.data.Library.clearListeningHistory()
                 }
                 confirm = null
             }) { Text("Confirm", color = MaterialTheme.colorScheme.error) } },

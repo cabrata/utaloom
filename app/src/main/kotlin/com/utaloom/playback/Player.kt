@@ -43,6 +43,8 @@ data class PlayerState(
     val queueTitle: String? = null,
     val error: String? = null,
     val sleepTimerEndsAt: Long? = null,
+    val speed: Float = 1f,
+    val pitch: Int = 0,
 ) {
     val current: Song? get() = queue.getOrNull(index)
     val hasNext get() = index < queue.lastIndex || repeat == RepeatMode.ALL
@@ -89,17 +91,29 @@ object Player {
     @Volatile private var loadedId: String? = null
     private var radioEndpoint: WatchEndpoint? = null
     private var radioContinuation: String? = null
+    data class PreparedTrack(val song: Song, val engine: AudioEngine, val gen: Long)
+    @Volatile private var prepared: PreparedTrack? = null
+    @Volatile private var fading: AudioEngine? = null
+    @Volatile private var crossfading = false
+    private var audioJob: Job? = null
+    private var backendPitch = 0
+    private var listeningSong: Song? = null
+    private var listeningTick = 0L
+    private var listeningActive = false
+    private var listenedPending = 0L
 
     val available: Boolean get() = mp != null
 
     @Synchronized fun init(): Boolean {
         if (mp != null) return true
         return runCatching {
-            mp = createAudioEngine()
             val s = Stores.settings.value
-            _state.update { it.copy(volume = s.volume) }
+            backendPitch = s.playbackPitch.coerceIn(-12, 12)
+            mp = createAudioEngine(backendPitch)
+            _state.update { it.copy(volume = s.volume, speed = validSpeed(s.playbackSpeed), pitch = backendPitch) }
             restoreQueue()
             persistJob = scope.launch { positionPersistLoop() }
+            audioJob = scope.launch { audioLoop() }
             true
         }.getOrElse {
             System.err.println("Audio backend unavailable: ${it.message}")
@@ -112,9 +126,11 @@ object Player {
         val old: AudioEngine?
         synchronized(this) {
             persist()
+            finishListening()
+            cancelTransitions()
             cancelSmartShuffle()
             cancelLoading()
-            sleepJob?.cancel(); persistJob?.cancel()
+            sleepJob?.cancel(); persistJob?.cancel(); audioJob?.cancel()
             old = mp
             mp = null; events = null
         }
@@ -426,6 +442,8 @@ object Player {
         cancelSmartShuffle()
         smartShuffleIds = emptySet()
         originalOrder = null
+        finishListening()
+        cancelTransitions()
         cancelLoading()
         sleepJob?.cancel()
         playWhenReady = false
@@ -433,7 +451,7 @@ object Player {
         val gen = generation.get()
         mp?.let { p -> p.submit { if (gen == generation.get() && p === mp) p.stop() } }
         loadedId = null
-        _state.update { PlayerState(volume = it.volume) }
+        _state.update { PlayerState(volume = it.volume, speed = it.speed, pitch = it.pitch) }
         persist()
     }
 
@@ -448,6 +466,39 @@ object Player {
     fun toggleMute() {
         _state.update { it.copy(muted = !it.muted) }
         applyVolume()
+    }
+
+    private fun validSpeed(value: Float) = if (value.isFinite()) value.coerceIn(0.5f, 2f) else 1f
+
+    fun setSpeed(speed: Float) {
+        require(speed.isFinite() && speed in 0.5f..2f) { "Speed must be between 0.5x and 2x" }
+        if (remoteControlled || hooks != null) return
+        Stores.settings.update { it.copy(playbackSpeed = speed) }
+        _state.update { it.copy(speed = speed) }
+        updateAudioEffects()
+    }
+
+    fun setPitch(semitones: Int) {
+        require(semitones in -12..12) { "Pitch must be between -12 and +12 semitones" }
+        if (remoteControlled || hooks != null) return
+        Stores.settings.update { it.copy(playbackPitch = semitones) }
+        // VLC's pitch filter is a factory option. The audio loop rebuilds at the live seek position.
+    }
+
+    fun updateAudioEffects() {
+        val settings = Stores.settings.value
+        val speed = if (remoteControlled || hooks != null) 1f else validSpeed(settings.playbackSpeed)
+        _state.update { it.copy(speed = speed) }
+        listOfNotNull(mp, prepared?.engine, fading).forEach { engine ->
+            engine.submit {
+                if (engine === mp || engine === prepared?.engine || engine === fading) {
+                    engine.setEqualizer(settings.equalizerEnabled,
+                        settings.equalizerPreamp.takeIf { it.isFinite() }?.coerceIn(-20f, 20f) ?: 0f,
+                        List(10) { settings.equalizerBands.getOrNull(it)?.takeIf { n -> n.isFinite() }?.coerceIn(-20f, 20f) ?: 0f })
+                    engine.setRate(speed)
+                }
+            }
+        }
     }
 
     private fun applyVolume() {
@@ -477,9 +528,11 @@ object Player {
 
     // region loading
 
-    @Synchronized private fun load(play: Boolean, notify: Boolean = true, startAt: Long = 0) {
+    @Synchronized private fun load(play: Boolean, notify: Boolean = true, startAt: Long = 0, countHistory: Boolean = true) {
         val song = _state.value.current ?: return
         val p = mp ?: return
+        if (countHistory) finishListening() else accountListening()
+        cancelTransitions()
         loadJob?.cancel()
         retryJob?.cancel()
         val gen = generation.incrementAndGet()
@@ -491,7 +544,7 @@ object Player {
         readyFor = null
         pendingSeek = startAt.takeIf { it > 0 }
         _state.update { it.copy(isPlaying = false, isBuffering = true, positionMs = startAt, durationMs = (song.duration ?: 0) * 1000L, error = null) }
-        Library.addHistory(song)
+        if (countHistory) Library.addHistory(song)
         if (notify && !remoteControlled) _state.value.let { hooks?.onTrackChanged(song, it.queue, it.index) }
         persist()
         loadJob = scope.launch { startMedia(p, song, gen) }
@@ -536,7 +589,11 @@ object Player {
                 // start-paused avoids a burst of audio while a guest waits for the host's play message.
                 val accepted = p.load(mrl, headers, startPaused = !playWhenReady)
                 if (!accepted && currentLoad(p, song.id, gen)) onError(gen)
-                if (currentLoad(p, song.id, gen)) applyVolume()
+                if (currentLoad(p, song.id, gen)) {
+                    applyVolume()
+                    updateAudioEffects()
+                    analyzeSilence(mrl, headers, song, gen)
+                }
             }
         }
     }
@@ -589,7 +646,9 @@ object Player {
             _state.update { it.copy(isPlaying = playWhenReady, isBuffering = false) }
             ready()
             applyVolume()
+            updateAudioEffects()
             if (playWhenReady) {
+                synchronized(Player) { beginListening(_state.value.current) }
                 if (!remoteControlled) hooks?.onPlaying(seek ?: p.time)
             } else {
                 p.submit { if (active() && !playWhenReady) p.setPause(true) }
@@ -598,6 +657,7 @@ object Player {
 
         override fun paused() {
             if (!active()) return
+            synchronized(Player) { accountListening() }
             _state.update { it.copy(isPlaying = false) }
             ready()
         }
@@ -617,8 +677,9 @@ object Player {
         }
         override fun finished() {
             if (!active()) return
+            synchronized(Player) { accountListening() }
             _state.update { it.copy(isPlaying = false) }
-            scope.launch { if (active()) next(auto = true) }
+            scope.launch { if (active() && !usePrepared(crossfadeMs = 0)) next(auto = true) }
         }
         override fun error() { if (active()) onError(gen) }
     }
@@ -637,6 +698,127 @@ object Player {
         while (scope.isActive) {
             delay(5000)
             if (_state.value.isPlaying) persist()
+        }
+    }
+
+    @Synchronized private fun beginListening(song: Song?) {
+        if (song == null) return
+        if (listeningSong == null) {
+            listeningSong = song
+            listenedPending = 0
+        }
+        listeningTick = System.nanoTime()
+        listeningActive = true
+    }
+
+    /** Wall-clock audio time, not seek position. Buffering and paused intervals never count. */
+    @Synchronized private fun accountListening() {
+        val now = System.nanoTime()
+        val s = _state.value
+        val active = s.isPlaying && !s.isBuffering && listeningSong != null
+        if (listeningActive && active && listeningTick != 0L) {
+            listenedPending += ((now - listeningTick) / 1_000_000).coerceIn(0, 2_000)
+        }
+        listeningTick = now
+        listeningActive = active
+        if (listenedPending >= 1000) flushListening()
+    }
+
+    private fun flushListening() {
+        val song = listeningSong ?: return
+        if (listenedPending <= 0) return
+        Library.recordListening(song, listenedPending)
+        listenedPending = 0
+    }
+
+    @Synchronized private fun finishListening() {
+        accountListening()
+        flushListening()
+        listeningSong = null
+        listeningActive = false
+        listeningTick = 0
+    }
+
+    private suspend fun audioLoop() {
+        var previousEffects: Triple<Boolean, Float, List<Float>>? = null
+        var previousSpeed = Float.NaN
+        while (scope.isActive && mp != null) {
+            delay(100)
+            accountListening()
+            val settings = Stores.settings.value
+            val room = remoteControlled || hooks != null
+            val speed = if (room) 1f else validSpeed(settings.playbackSpeed)
+            val effects = Triple(settings.equalizerEnabled, settings.equalizerPreamp, settings.equalizerBands)
+            if (speed != previousSpeed || effects != previousEffects) {
+                previousSpeed = speed; previousEffects = effects
+                updateAudioEffects()
+            }
+            val pitch = if (room) 0 else settings.playbackPitch.coerceIn(-12, 12)
+            if (pitch != backendPitch) rebuildAudio(pitch)
+            advanceAudio()
+        }
+    }
+
+    private suspend fun rebuildAudio(pitch: Int) {
+        val old = mp ?: return
+        val replacement = runCatching { createAudioEngine(pitch) }.getOrElse {
+            _state.update { s -> s.copy(error = "Couldn't change pitch. Current audio was kept.") }
+            Stores.settings.update { it.copy(playbackPitch = backendPitch) }
+            return
+        }
+        val swapped = synchronized(Player) {
+            val desired = if (remoteControlled || hooks != null) 0 else Stores.settings.value.playbackPitch.coerceIn(-12, 12)
+            if (old !== mp || pitch != desired) false else {
+                events?.let { old.removeListener(it) }
+                events = null
+                mp = replacement
+                backendPitch = pitch
+                _state.update { it.copy(pitch = pitch) }
+                load(playWhenReady, notify = false, startAt = _state.value.positionMs, countHistory = false)
+                true
+            }
+        }
+        if (swapped) old.release() else replacement.release()
+    }
+
+    @Synchronized fun restoreAfterBackup() {
+        stop(fromRemote = true)
+        restoreQueue()
+        Stores.settings.value.let { s ->
+            setVolume(s.volume)
+            updateAudioEffects()
+        }
+    }
+
+    private fun cancelTransitions() {
+        prepared?.engine?.release()
+        prepared = null
+        fading?.release()
+        fading = null
+        crossfading = false
+    }
+
+    private fun analyzeSilence(mrl: String, headers: Map<String, String>, song: Song, gen: Long) {
+        if (!Stores.settings.value.skipSilence) return
+    }
+
+    private fun usePrepared(crossfadeMs: Long): Boolean {
+        return false
+    }
+
+    private fun advanceAudio() {
+        val s = _state.value
+        val settings = Stores.settings.value
+        if (remoteControlled || hooks != null || !s.isPlaying || s.durationMs <= 0) return
+        val remaining = s.durationMs - s.positionMs
+        if (settings.crossfadeSeconds > 0 && remaining in 300..((settings.crossfadeSeconds * 1000L).coerceAtLeast(1000L))) {
+            if (!crossfading && s.hasNext) {
+                crossfading = true
+                scope.launch {
+                    next(auto = true)
+                    crossfading = false
+                }
+            }
         }
     }
 
