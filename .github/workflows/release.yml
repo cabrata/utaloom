@@ -80,15 +80,29 @@ jobs:
     needs: [version, package]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
+      - name: Generate AI Changelog & Release Notes
+        env:
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          AI_MODEL: ${{ secrets.AI_MODEL }}
+        run: |
+          python3 scripts/changelog.py --release "${{ needs.version.outputs.tag }}" --output release-notes.md || true
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          git diff --staged --quiet || (git commit -m "docs(changelog): update CHANGELOG.md for ${{ needs.version.outputs.tag }} [skip ci]" && git push)
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.version.outputs.tag }}
           target_commitish: ${{ github.sha }}
           name: Utaloom ${{ needs.version.outputs.tag }}
           files: dist/**/*
-          generate_release_notes: true
+          body_path: release-notes.md
           make_latest: true
