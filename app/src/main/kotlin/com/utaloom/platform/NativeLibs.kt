@@ -29,7 +29,20 @@ object NativeLibs {
 
     private fun tryDiscover(): Boolean {
         val d = NativeDiscovery()
-        return d.discover().also { if (it) vlcPath = d.discoveredPath() }
+        return d.discover().also { found ->
+            if (found) {
+                val path = d.discoveredPath()
+                vlcPath = path
+                if (path != null) {
+                    val orig = System.getProperty("jna.library.path")
+                    if (orig == null || !orig.contains(path)) {
+                        System.setProperty("jna.library.path", listOfNotNull(path, orig).joinToString(File.pathSeparator))
+                    }
+                    com.sun.jna.NativeLibrary.addSearchPath("libvlccore", path)
+                    com.sun.jna.NativeLibrary.addSearchPath("vlccore", path)
+                }
+            }
+        }
     }
 
     private val libName = when {

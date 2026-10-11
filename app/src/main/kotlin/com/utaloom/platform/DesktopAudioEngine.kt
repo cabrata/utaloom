@@ -3,26 +3,35 @@ package com.utaloom.playback
 import com.sun.jna.Library
 import com.sun.jna.Native
 import com.sun.jna.Pointer
-import com.sun.jna.Structure
 import com.utaloom.data.Stores
 import uk.co.caprica.vlcj.factory.MediaPlayerFactory
 import uk.co.caprica.vlcj.player.base.MediaPlayer
 import uk.co.caprica.vlcj.player.base.MediaPlayerEventAdapter
 
-@Structure.FieldOrder("psz_string", "pad")
-open class VlcValue : Structure() {
-    class ByValue : VlcValue(), Structure.ByValue
-    @JvmField var psz_string: String? = null
-    @JvmField var pad: Long = 0L
-}
-
 interface LibVlcCore : Library {
-    fun var_SetChecked(obj: Pointer, name: String, type: Int, value: VlcValue.ByValue): Int
+    fun var_SetChecked(obj: Pointer, name: String, type: Int, value: String): Int
 
     companion object {
-        val INSTANCE: LibVlcCore? = runCatching {
-            Native.load("vlccore", LibVlcCore::class.java)
-        }.getOrNull()
+        val INSTANCE: LibVlcCore? by lazy {
+            com.utaloom.platform.NativeLibs.discoverVlc()
+            val dir = com.utaloom.platform.NativeLibs.vlcPath
+            if (dir != null) {
+                com.sun.jna.NativeLibrary.addSearchPath("vlccore", dir)
+                com.sun.jna.NativeLibrary.addSearchPath("libvlccore", dir)
+            }
+            val fileCandidates = if (dir != null) {
+                listOf(
+                    java.io.File(dir, "libvlccore.dll"),
+                    java.io.File(dir, "libvlccore.dylib"),
+                    java.io.File(dir, "libvlccore.so"),
+                    java.io.File(dir, "libvlccore.so.9"),
+                ).filter { it.exists() }.map { it.absolutePath }
+            } else emptyList()
+
+            (fileCandidates + listOf("libvlccore", "vlccore")).firstNotNullOfOrNull { target ->
+                runCatching { Native.load(target, LibVlcCore::class.java) }.getOrNull()
+            }
+        }
     }
 }
 
@@ -146,21 +155,18 @@ private class DesktopAudioEngine(
             factory.release()
         }
     }
+}
 
-    companion object {
-        internal fun syncAudioFilter(player: MediaPlayer, pitch: Int, enabled: Boolean) {
-            val bounded = AudioEffects.sanitizePitch(pitch)
-            val filterString = when {
-                enabled && bounded != 0 -> "equalizer:scaletempo:scaletempo_pitch"
-                enabled -> "equalizer:scaletempo"
-                bounded != 0 -> "scaletempo:scaletempo_pitch"
-                else -> "scaletempo"
-            }
-            runCatching {
-                val ptr = player.mediaPlayerInstance()?.getPointer() ?: return@runCatching
-                val vlcVal = VlcValue.ByValue().apply { psz_string = filterString }
-                LibVlcCore.INSTANCE?.var_SetChecked(ptr, "audio-filter", 0x0040, vlcVal)
-            }
-        }
+internal fun syncAudioFilter(player: MediaPlayer, pitch: Int, enabled: Boolean = false) {
+    val bounded = AudioEffects.sanitizePitch(pitch)
+    val filterString = when {
+        enabled && bounded != 0 -> "equalizer:scaletempo:scaletempo_pitch"
+        enabled -> "equalizer:scaletempo"
+        bounded != 0 -> "scaletempo:scaletempo_pitch"
+        else -> "scaletempo"
+    }
+    runCatching {
+        val ptr = player.mediaPlayerInstance()?.getPointer() ?: return@runCatching
+        LibVlcCore.INSTANCE?.var_SetChecked(ptr, "audio-filter", 0x0040, filterString)
     }
 }

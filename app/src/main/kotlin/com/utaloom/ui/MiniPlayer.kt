@@ -3,6 +3,7 @@ package com.utaloom.ui
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -34,7 +35,7 @@ fun MiniPlayer(onShowMain: () -> Unit) {
                         Text(song?.title ?: "Nothing playing", maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
                         Text(song?.artistText.orEmpty(), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
                     }
-                    IconButton(onShowMain) { Icon(Icons.Default.OpenInNew, "Show Utaloom") }
+                    IconButton(onShowMain) { Icon(Icons.AutoMirrored.Filled.OpenInNew, "Show Utaloom") }
                 }
                 var dragging by remember(song?.id) { mutableStateOf(false) }
                 var target by remember { mutableFloatStateOf(0f) }
@@ -66,7 +67,7 @@ fun MiniPlayer(onShowMain: () -> Unit) {
                     }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(Player::toggleMute) { Icon(if (s.muted) Icons.Default.VolumeOff else Icons.Default.VolumeUp, if (s.muted) "Unmute" else "Mute") }
+                    IconButton(Player::toggleMute) { Icon(if (s.muted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp, if (s.muted) "Unmute" else "Mute") }
                     Slider(if (s.muted) 0f else s.volume / 100f, { Player.setVolume((it * 100).toInt()) }, Modifier.weight(1f).semantics { contentDescription = "Mini player volume" })
                 }
                 if (guest) Text("Host controls playback", style = MaterialTheme.typography.labelSmall)

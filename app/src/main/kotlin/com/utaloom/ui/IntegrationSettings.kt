@@ -38,7 +38,7 @@ fun IntegrationSettings() {
             Switch(checked = showSecrets, onCheckedChange = { showSecrets = it })
         }
 
-        Divider()
+        HorizontalDivider()
 
         // region Last.fm
         Text("Last.fm", style = MaterialTheme.typography.titleMedium)
@@ -111,7 +111,7 @@ fun IntegrationSettings() {
         }
         // endregion
 
-        Divider()
+        HorizontalDivider()
 
         // region ListenBrainz
         Text("ListenBrainz", style = MaterialTheme.typography.titleMedium)
@@ -153,7 +153,7 @@ fun IntegrationSettings() {
         }
         // endregion
 
-        Divider()
+        HorizontalDivider()
 
         // region Discord Rich Presence
         Text("Discord Rich Presence", style = MaterialTheme.typography.titleMedium)

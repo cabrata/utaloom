@@ -4,7 +4,7 @@ import com.sun.jna.Pointer
 import com.utaloom.data.Paths
 import com.utaloom.platform.NativeLibs
 import com.utaloom.playback.LibVlcCore
-import com.utaloom.playback.VlcValue
+import com.utaloom.playback.syncAudioFilter
 import com.utaloom.playback.audioEngineOptions
 import com.utaloom.playback.createAudioEngine
 import org.junit.Assert.assertTrue
@@ -33,6 +33,7 @@ fun runAudioPitchAcceptance() {
     println("Starting AudioPitchAcceptance native validation...")
     val vlcErr = NativeLibs.discoverVlc()
     check(vlcErr == null) { "libVLC not discoverable: $vlcErr" }
+    check(LibVlcCore.INSTANCE != null) { "libvlccore not loadable (vlcPath=${NativeLibs.vlcPath})" }
 
     val wavFile = Paths.dir.resolve("native_pitch_acceptance.wav")
     val sampleRate = 44100
@@ -82,14 +83,7 @@ private fun measurePitch(wav: File, pitch: Int, sampleRate: Int): Double {
     val latch = CountDownLatch(1)
 
     try {
-        val filterString = if (pitch != 0) "scaletempo:scaletempo_pitch" else "scaletempo"
-        runCatching {
-            val ptr = player.mediaPlayerInstance()?.getPointer()
-            if (ptr != null) {
-                val vlcVal = VlcValue.ByValue().apply { psz_string = filterString }
-                LibVlcCore.INSTANCE?.var_SetChecked(ptr, "audio-filter", 0x0040, vlcVal)
-            }
-        }
+        syncAudioFilter(player, pitch, enabled = false)
 
         player.audio().callback("S16N", sampleRate, 1, object : AudioCallbackAdapter() {
             override fun play(mediaPlayer: MediaPlayer, data: Pointer, sampleCount: Int, pts: Long) {
@@ -104,6 +98,7 @@ private fun measurePitch(wav: File, pitch: Int, sampleRate: Int): Double {
         })
 
         player.media().play(wav.absolutePath)
+        syncAudioFilter(player, pitch, enabled = false)
         latch.await(4, TimeUnit.SECONDS)
         player.controls().stop()
     } finally {

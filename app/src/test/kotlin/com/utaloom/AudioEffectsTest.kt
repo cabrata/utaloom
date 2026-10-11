@@ -7,7 +7,7 @@ import com.utaloom.platform.NativeLibs
 import com.utaloom.playback.AudioEffects
 import com.utaloom.playback.AudioEngine
 import com.utaloom.playback.LibVlcCore
-import com.utaloom.playback.VlcValue
+import com.utaloom.playback.syncAudioFilter
 import com.utaloom.playback.audioEngineOptions
 import com.utaloom.playback.createAudioEngine
 import org.junit.Assert.*
@@ -105,6 +105,7 @@ class AudioEffectsTest {
     @Test
     fun realNativeSinePitchAcceptance() {
         assumeTrue("libVLC required for real native fixture", NativeLibs.discoverVlc() == null)
+        assumeTrue("libvlccore required for real native pitch shift", LibVlcCore.INSTANCE != null)
 
         val wavFile = Paths.dir.resolve("audio_pitch_acceptance_sine.wav")
         val sampleRate = 44100
@@ -131,6 +132,7 @@ class AudioEffectsTest {
     @Test
     fun runAudioPitchAcceptanceMainFixture() {
         assumeTrue("libVLC required for standalone fixture", NativeLibs.discoverVlc() == null)
+        assumeTrue("libvlccore required for standalone fixture", LibVlcCore.INSTANCE != null)
         runAudioPitchAcceptance()
     }
 
@@ -166,14 +168,7 @@ class AudioEffectsTest {
         val latch = CountDownLatch(1)
 
         try {
-            val filterString = if (pitch != 0) "scaletempo:scaletempo_pitch" else "scaletempo"
-            runCatching {
-                val ptr = player.mediaPlayerInstance()?.getPointer()
-                if (ptr != null) {
-                    val vlcVal = VlcValue.ByValue().apply { psz_string = filterString }
-                    LibVlcCore.INSTANCE?.var_SetChecked(ptr, "audio-filter", 0x0040, vlcVal)
-                }
-            }
+            syncAudioFilter(player, pitch, enabled = false)
 
             player.audio().callback("S16N", sampleRate, 1, object : AudioCallbackAdapter() {
                 override fun play(mediaPlayer: MediaPlayer, data: Pointer, sampleCount: Int, pts: Long) {
@@ -188,6 +183,7 @@ class AudioEffectsTest {
             })
 
             player.media().play(wav.absolutePath)
+            syncAudioFilter(player, pitch, enabled = false)
             latch.await(4, TimeUnit.SECONDS)
             player.controls().stop()
         } finally {

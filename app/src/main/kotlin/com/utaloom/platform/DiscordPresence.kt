@@ -141,7 +141,7 @@ internal fun discordActivityPayload(appId: String, song: Song?, state: PlayerSta
         put("cmd", "SET_ACTIVITY")
         putJsonObject("args") {
             put("pid", ProcessHandle.current().pid())
-            if (!isPlaying || song == null) {
+            if (!isPlaying) {
                 put("activity", JsonNull)
             } else {
                 putJsonObject("activity") {
@@ -242,12 +242,12 @@ object DiscordPresence {
                 val now = System.currentTimeMillis() / 1000L
                 val payload = discordActivityPayload(appId, liveState.current, liveState, now)
                 val updateOk = runCatching {
-                    transport?.writeFrame(DiscordOpcode.FRAME, payload)
+                    transport.writeFrame(DiscordOpcode.FRAME, payload)
                     true
                 }.getOrDefault(false)
 
                 if (!updateOk) {
-                    transport?.close()
+                    transport.close()
                     transport = null
                     currentAppId = null
                     _status.value = "Disconnected, reconnecting..."

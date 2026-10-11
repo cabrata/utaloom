@@ -68,7 +68,7 @@ internal class ListenTracker(private val minimumDurationMs: Long = 30_000) {
         }
         val nowPlaying = song != null && playing && startedAt == 0L
         if (nowPlaying) startedAt = epochSeconds.coerceAtLeast(1)
-        if (!changed && old != null && song != null) {
+        if (!changed && song != null) {
             val positionDelta = state.positionMs - old.positionMs
             val seek = positionDelta < 0 || positionDelta > elapsed + 1500
             if (positionDelta > 0 && !seek) lastProgressAt = monotonicMs
