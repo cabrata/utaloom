@@ -5,8 +5,6 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
@@ -49,7 +47,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -469,7 +466,7 @@ fun QueuePanel(modifier: Modifier = Modifier, compact: Boolean = false) {
             if (!guest && s.queue.size > 1) TextButton(Player::clearQueue) { Text("Clear") }
         }
         if (s.queue.isEmpty()) return@Column EmptyBox("Queue is empty", Icons.AutoMirrored.Filled.QueueMusic)
-        LazyColumn(state = list) {
+        VScrollColumn(state = list) {
             itemsIndexed(s.queue, key = { i, song -> "$i-${song.id}" }) { i, song ->
                 SongRow(
                     song,
@@ -514,8 +511,8 @@ fun LyricsPanel(modifier: Modifier = Modifier, compact: Boolean = false) {
     val result = lyrics ?: return Loading(modifier)
     val ly = result.getOrNull()
     if (ly == null) {
-        return Box(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        return VScrollBox(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(result.exceptionOrNull()?.message?.let { "Couldn't load lyrics: $it" } ?: "No lyrics found", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 TextButton({ LyricsRepository.invalidate(song.id); reload++ }) { Text("Retry") }
             }
@@ -526,8 +523,8 @@ fun LyricsPanel(modifier: Modifier = Modifier, compact: Boolean = false) {
     Column(modifier.fillMaxSize()) {
         if (!ly.synced) {
             SelectionContainer(Modifier.weight(1f)) {
-                LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-                    item { Text(ly.plain, style = style.copy(fontWeight = FontWeight.Medium, fontSize = fontSize * 0.75f, lineHeight = fontSize)) }
+                VScrollColumn(Modifier.fillMaxSize()) {
+                    item { Text(ly.plain, Modifier.padding(horizontal = 16.dp), style = style.copy(fontWeight = FontWeight.Medium, fontSize = fontSize * 0.75f, lineHeight = fontSize)) }
                 }
             }
         } else {
@@ -541,16 +538,13 @@ fun LyricsPanel(modifier: Modifier = Modifier, compact: Boolean = false) {
             val hover = remember { MutableInteractionSource() }
             val hovered by hover.collectIsHoveredAsState()
             LaunchedEffect(song.id, current) { list.animateScrollToItem(current.coerceAtLeast(0)) }
-            BoxWithConstraints(
-                Modifier.weight(1f).hoverable(hover)
-                    // Soft fade at the top and bottom edges, like Apple Music.
-                    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-                    .drawWithContent {
+            BoxWithConstraints(Modifier.weight(1f).hoverable(hover)) {
+                VScrollColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(top = maxHeight * 0.25f, bottom = maxHeight * 0.7f),
+                    // Fade the lyrics, not the scrollbar.
+                    contentModifier = Modifier.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }.drawWithContent {
                         drawContent()
                         drawRect(Brush.verticalGradient(0f to Color.Transparent, 0.1f to Color.Black, 0.8f to Color.Black, 1f to Color.Transparent), blendMode = BlendMode.DstIn)
-                    },
-            ) {
-                LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(top = maxHeight * 0.25f, bottom = maxHeight * 0.7f)) {
+                    }) {
                     itemsIndexed(items) { i, item ->
                         if (item.line < 0) {
                             // Gap: dots only while it is playing, collapsed otherwise so lines don't jump around.

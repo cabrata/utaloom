@@ -2,9 +2,6 @@ package com.utaloom.ui
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -138,7 +135,7 @@ private fun PlaylistNameDialog(title: String, initial: String = "", onDismiss: (
     var name by remember { mutableStateOf(initial) }
     val error = playlistNameError(name)
     AlertDialog(onDismissRequest = onDismiss, title = { Text(title) }, text = {
-        OutlinedTextField(name, { name = it }, Modifier.fillMaxWidth().verticalScroll(rememberScrollState()), label = { Text("Playlist name") }, singleLine = true,
+        OutlinedTextField(name, { name = it }, Modifier.fillMaxWidth(), label = { Text("Playlist name") }, singleLine = true,
             isError = name.isNotEmpty() && error != null, supportingText = { Text(error ?: "${name.trim().length}/200") })
     }, confirmButton = { TextButton({ onSave(name.trim()); onDismiss() }, enabled = error == null) { Text("Save") } },
         dismissButton = { TextButton(onDismiss) { Text("Cancel") } })
@@ -146,7 +143,7 @@ private fun PlaylistNameDialog(title: String, initial: String = "", onDismiss: (
 
 @Composable
 private fun LibraryConfirm(title: String, message: String, onDismiss: () -> Unit, onConfirm: () -> Unit) {
-    AlertDialog(onDismissRequest = onDismiss, title = { Text(title, maxLines = 3, overflow = TextOverflow.Ellipsis) }, text = { Text(message, Modifier.verticalScroll(rememberScrollState())) },
+    AlertDialog(onDismissRequest = onDismiss, title = { Text(title, maxLines = 3, overflow = TextOverflow.Ellipsis) }, text = { VScrollBox { Text(message) } },
         confirmButton = { TextButton({ onConfirm(); onDismiss() }) { Text("Confirm", color = MaterialTheme.colorScheme.error) } },
         dismissButton = { TextButton(onDismiss) { Text("Cancel") } })
 }
@@ -195,7 +192,7 @@ fun LibraryScreen() {
         }
     }
     if (account) AccountLibrary(Modifier.fillMaxSize(), header = { Header() })
-    else LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 32.dp)) {
+    else VScrollColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 32.dp)) {
         item { Header() }
         item {
             FlowRow(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -284,12 +281,12 @@ private fun AccountLibrary(modifier: Modifier, header: @Composable () -> Unit) {
     val shown = entries.filter { (!settings.hideExplicit || !it.explicit) && (query.isBlank() || "${it.title} ${it.subtitle()}".contains(query.trim(), true)) }
         .let { if (sort == "Title") it.sortedBy { item -> item.title.lowercase(Locale.ROOT) } else it }
     val songs = shown.filterIsInstance<SongItem>().map { it.toSong() }
-    LazyColumn(modifier, contentPadding = PaddingValues(bottom = 32.dp)) {
+    VScrollColumn(modifier, contentPadding = PaddingValues(bottom = 32.dp)) {
         item { header() }
         if (settings.cookie == null) {
             item { Text("Sign in from Settings to access your YouTube Music library.", Modifier.padding(24.dp)) }
             item { TextButton({ Nav.go(Screen.Settings) }, Modifier.padding(horizontal = 24.dp)) { Text("Open Settings") } }
-            return@LazyColumn
+            return@VScrollColumn
         }
         item {
             FlowRow(Modifier.fillMaxWidth().padding(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -336,7 +333,7 @@ fun SongListScreen(title: String, kind: String) {
         else -> emptyList()
     }
     val shown = visibleSongs(source, query, sort, settings.hideExplicit)
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 32.dp)) {
+    VScrollColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 32.dp)) {
         item { SongsHeader(title, shown) }
         if (kind == "history") item { TextButton({ clear = true }, Modifier.padding(horizontal = 24.dp), enabled = lib.history.isNotEmpty()) { Text("Clear listening history") } }
         item { LibrarySearch(query, { query = it }, sort, { sort = it }) }
@@ -369,7 +366,7 @@ fun LocalPlaylistScreen(id: String) {
     val shown = visibleSongs(playlist.songs, query, sort, settings.hideExplicit)
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val compact = maxWidth < 600.dp * LocalDensity.current.fontScale
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 32.dp)) {
+        VScrollColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 32.dp)) {
         item { SongsHeader(playlist.name, shown) }
         item {
         FlowRow(Modifier.fillMaxWidth().padding(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -442,7 +439,7 @@ private fun AddPlaylistSongsDialog(id: String, onDismiss: () -> Unit) {
     val scope = rememberCoroutineScope()
     val choices = (knownSongs(lib) + results).distinctBy { it.id }.filter { it.id !in existing && (!settings.hideExplicit || !it.explicit) && (query.isBlank() || "${it.title} ${it.artistText}".contains(query.trim(), true)) }
     AlertDialog(onDismissRequest = onDismiss, title = { Text("Add songs") }, text = {
-        LazyColumn(Modifier.widthIn(max = 520.dp).fillMaxWidth().heightIn(max = 350.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        VScrollColumn(Modifier.widthIn(max = 520.dp).fillMaxWidth().heightIn(max = 350.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             item { OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Find songs") }) }
             item {
             TextButton({

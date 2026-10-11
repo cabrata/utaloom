@@ -3,9 +3,7 @@ package com.utaloom.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -62,7 +60,7 @@ fun HomeScreen() {
     when {
         result == null -> Loading()
         page == null -> ErrorBox(result?.exceptionOrNull()?.message ?: "Couldn't load home") { refresh++ }
-        else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 32.dp)) {
+        else -> VScrollColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 32.dp)) {
             item {
                 Row(Modifier.fillMaxWidth().padding(24.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
@@ -95,7 +93,7 @@ fun ExploreScreen() {
     val page = result?.getOrNull()
     if (result == null) return Loading()
     if (page == null) return ErrorBox(result?.exceptionOrNull()?.message ?: "Explore unavailable")
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 32.dp)) {
+    VScrollColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 32.dp)) {
         item { Text("Explore", style = MaterialTheme.typography.headlineLarge, modifier = Modifier.padding(24.dp)) }
         carousel("New releases", page.newReleaseAlbums)
         if (page.moodAndGenres.isNotEmpty()) {
@@ -154,7 +152,7 @@ fun SearchScreen(query: String) {
         }
         loading = false
     }
-    LazyColumn(Modifier.fillMaxSize(), state, contentPadding = PaddingValues(bottom = 24.dp)) {
+    VScrollColumn(Modifier.fillMaxSize(), state, contentPadding = PaddingValues(bottom = 24.dp)) {
         item { Text("Results for \"$query\"", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp)) }
         item {
             HScrollRow(PaddingValues(horizontal = 24.dp), Arrangement.spacedBy(8.dp)) {
@@ -235,7 +233,7 @@ fun AlbumScreen(id: String) {
     val a = page.album
     val songs = page.songs.map { it.toSong() }
     val saved = lib.savedAlbums.any { it.id == a.browseId }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 32.dp)) {
+    VScrollColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 32.dp)) {
         item {
             CollectionHeader(a.title, a.subtitle(), a.thumbnail, songs, saved = saved,
                 onSave = { Library.toggleSaved("album", SavedRef(a.browseId, a.title, a.artists?.joinToString(", ") { it.name }, a.thumbnail, a.playlistId)) })
@@ -306,7 +304,7 @@ fun PlaylistScreen(id: String) {
     if (error != null) return ErrorBox(error!!)
     val p = page?.playlist ?: return Loading()
     val saved = lib.savedPlaylists.any { it.id == p.id }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+    VScrollColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
         item {
             CollectionHeader(p.title, p.subtitle(), p.thumbnail, songs, p.description, saved,
                 onSave = { Library.toggleSaved("playlist", SavedRef(p.id, p.title, p.author?.name, p.thumbnail)) },
@@ -336,7 +334,7 @@ fun ArtistScreen(id: String) {
     val lib by Stores.library.state.collectAsState()
     if (result == null) return Loading()
     if (a == null) return ErrorBox(result?.exceptionOrNull()?.message ?: "Artist unavailable")
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 32.dp)) {
+    VScrollColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 32.dp)) {
         item {
             @Composable
             fun ArtistDetails(modifier: Modifier) {
@@ -380,7 +378,7 @@ fun BrowseScreen(title: String, endpoint: BrowseEndpoint) {
     val page = result?.getOrNull()
     if (result == null) return Loading()
     if (page == null) return ErrorBox(result?.exceptionOrNull()?.message ?: "Unavailable")
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+    VScrollColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
         item { Text(page.title ?: title, style = MaterialTheme.typography.headlineLarge, modifier = Modifier.padding(24.dp)) }
         page.items.forEachIndexed { i, section ->
             if (section.items.all { it is SongItem }) {
@@ -409,7 +407,7 @@ fun ArtistItemsScreen(title: String, endpoint: BrowseEndpoint) {
     if (!loaded) return Loading()
     if (error != null) return ErrorBox(error!!)
     val songs = list.filterIsInstance<SongItem>().map { it.toSong() }
-    LazyColumn(Modifier.fillMaxSize()) {
+    VScrollColumn(Modifier.fillMaxSize()) {
         item { Text(title, style = MaterialTheme.typography.headlineLarge, modifier = Modifier.padding(24.dp)) }
         items(list) { ItemRow(it, songs, title) }
         if (cont != null) item {

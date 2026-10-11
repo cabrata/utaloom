@@ -1,9 +1,6 @@
 package com.utaloom.ui
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowDropDown
@@ -123,7 +120,7 @@ fun SettingsScreen(isMobile: Boolean = System.getProperty("java.vm.name") == "Da
     val lib by Stores.library.state.collectAsState()
     var login by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf<String?>(null) }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    VScrollColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         item { SectionTitle("Settings") }
         item {
             SectionTitle("YouTube Music account")
@@ -214,7 +211,7 @@ fun SettingsScreen(isMobile: Boolean = System.getProperty("java.vm.name") == "Da
     confirm?.let { action ->
         val title = when (action) { "signout" -> "Sign out?"; "search" -> "Clear search history?"; else -> "Clear listening history?" }
         val message = when (action) { "signout" -> "Remove your saved cookie and account details from this device. Local playlists, likes and downloads are kept."; "search" -> "Remove all locally saved searches?"; else -> "Remove local listening history and play counts? Liked songs and playlists are kept." }
-        AlertDialog(onDismissRequest = { confirm = null }, title = { Text(title) }, text = { Text(message, Modifier.verticalScroll(rememberScrollState())) },
+        AlertDialog(onDismissRequest = { confirm = null }, title = { Text(title) }, text = { VScrollBox { Text(message) } },
             confirmButton = { TextButton({
                 when (action) {
                     "signout" -> {
@@ -294,15 +291,17 @@ private fun CookieLoginDialog(onDismiss: () -> Unit) {
     val validation = loginCookieError(cookie)
     val scope = rememberCoroutineScope()
     AlertDialog(onDismissRequest = { if (!busy) { cookie = ""; onDismiss() } }, title = { Text("Sign in with a cookie") }, text = {
-        Column(Modifier.widthIn(max = 540.dp).fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("In your browser, sign in to music.youtube.com, open Developer Tools → Network, and copy the Cookie header from a request to that site. Paste only the header value, not 'Cookie:'.")
-            Text("Cookies grant access to your account. Never share them. Utaloom keeps the validated cookie in its local settings file with restricted access; it is not encrypted.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            OutlinedTextField(cookie, { cookie = it; error = null }, Modifier.fillMaxWidth(), enabled = !busy,
-                label = { Text("Cookie header value") }, visualTransformation = PasswordVisualTransformation(), minLines = 2, maxLines = 4,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), isError = cookie.isNotEmpty() && validation != null,
-                supportingText = { Text(if (busy) "Checking your account…" else validation ?: "${cookie.toByteArray(Charsets.UTF_8).size}/16384 bytes") })
-            if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-            error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        VScrollBox(Modifier.widthIn(max = 540.dp).fillMaxWidth()) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("In your browser, sign in to music.youtube.com, open Developer Tools → Network, and copy the Cookie header from a request to that site. Paste only the header value, not 'Cookie:'.")
+                Text("Cookies grant access to your account. Never share them. Utaloom keeps the validated cookie in its local settings file with restricted access; it is not encrypted.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                OutlinedTextField(cookie, { cookie = it; error = null }, Modifier.fillMaxWidth(), enabled = !busy,
+                    label = { Text("Cookie header value") }, visualTransformation = PasswordVisualTransformation(), minLines = 2, maxLines = 4,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), isError = cookie.isNotEmpty() && validation != null,
+                    supportingText = { Text(if (busy) "Checking your account…" else validation ?: "${cookie.toByteArray(Charsets.UTF_8).size}/16384 bytes") })
+                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            }
         }
     }, confirmButton = { TextButton({
         val candidate = cookie

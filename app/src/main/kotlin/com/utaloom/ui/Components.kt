@@ -5,15 +5,26 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.HorizontalScrollbar
+import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.VerticalScrollbar
+import androidx.compose.foundation.defaultScrollbarStyle
 import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitTouchSlopOrCancellation
+import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.gestures.ScrollableDefaults
+import androidx.compose.foundation.gestures.ScrollableState
 import androidx.compose.foundation.gestures.animateScrollBy
-import androidx.compose.foundation.gestures.draggable
-import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.MutatePriority
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
@@ -21,6 +32,9 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.isActive
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.rememberScrollState
@@ -82,9 +96,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerType
+import androidx.compose.ui.input.pointer.isPrimaryPressed
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
@@ -93,6 +112,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import kotlin.math.abs
 import com.utaloom.data.Library
 import com.utaloom.data.SavedRef
 import com.utaloom.data.Song
@@ -113,6 +133,112 @@ import com.utaloom.innertube.models.YTItem
 fun formatTime(ms: Long): String {
     val s = (ms / 1000).coerceAtLeast(0)
     return if (s >= 3600) "%d:%02d:%02d".format(s / 3600, s % 3600 / 60, s % 60) else "%d:%02d".format(s / 60, s % 60)
+}
+
+/** AWT touchscreens emit mouse drags. Handle only those and leave genuine touch, wheel, and keys native. */
+@Composable
+private fun Modifier.dragToScroll(state: ScrollableState, orientation: Orientation): Modifier {
+    val fling = ScrollableDefaults.flingBehavior()
+    return pointerInput(state, orientation, fling) {
+        fun Offset.axis() = if (orientation == Orientation.Vertical) y else x
+        coroutineScope {
+            while (isActive) {
+                val velocity = VelocityTracker()
+                var initial = 0f
+                val start = awaitPointerEventScope {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    if (down.type != PointerType.Mouse || !currentEvent.buttons.isPrimaryPressed ||
+                        !(state.canScrollBackward || state.canScrollForward)) {
+                        while (currentEvent.changes.any { it.pressed }) awaitPointerEvent()
+                        return@awaitPointerEventScope null
+                    }
+                    velocity.addPosition(down.uptimeMillis, down.position)
+                    // Lock at touch slop, so slightly diagonal swipes cannot steal the other scroll axis.
+                    var rejected = false
+                    awaitTouchSlopOrCancellation(down.id) { change, overSlop ->
+                        val delta = change.position - down.position
+                        if ((abs(delta.y) > abs(delta.x)) != (orientation == Orientation.Vertical)) rejected = true
+                        if (!rejected) {
+                            initial = overSlop.axis()
+                            change.consume()
+                        }
+                    }
+                }
+                if (start != null) try {
+                    velocity.addPosition(start.uptimeMillis, start.position)
+                    var released = false
+                    state.scroll(MutatePriority.UserInput) {
+                        scrollBy(-initial)
+                        awaitPointerEventScope {
+                            released = drag(start.id) { change ->
+                                velocity.addPosition(change.uptimeMillis, change.position)
+                                scrollBy(-change.positionChange().axis())
+                                change.consume()
+                            }
+                            currentEvent.changes.firstOrNull { it.id == start.id }?.let { velocity.addPosition(it.uptimeMillis, it.position) }
+                        }
+                    }
+                    if (released) {
+                        val speed = velocity.calculateVelocity().let { if (orientation == Orientation.Vertical) it.y else it.x }
+                        launch { state.scroll { with(fling) { performFling(-speed) } } }
+                    }
+                } catch (cancelled: CancellationException) {
+                    if (!isActive) throw cancelled
+                }
+                awaitPointerEventScope { while (currentEvent.changes.any { it.pressed }) awaitPointerEvent() }
+            }
+        }
+    }
+}
+
+@Composable
+private fun scrollBarStyle() = defaultScrollbarStyle().copy(
+    thickness = 8.dp,
+    minimalHeight = 32.dp,
+    unhoverColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+    hoverColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+)
+
+/** A vertical list with mouse/touch dragging and a right-side scrollbar sharing the same state. */
+@Composable
+fun VScrollColumn(
+    modifier: Modifier = Modifier,
+    state: LazyListState = rememberLazyListState(),
+    contentPadding: PaddingValues = PaddingValues(0.dp),
+    verticalArrangement: Arrangement.Vertical = Arrangement.Top,
+    horizontalAlignment: Alignment.Horizontal = Alignment.Start,
+    contentModifier: Modifier = Modifier,
+    content: LazyListScope.() -> Unit,
+) {
+    Box(modifier) {
+        LazyColumn(
+            Modifier.fillMaxWidth().padding(end = 12.dp).then(contentModifier).dragToScroll(state, Orientation.Vertical),
+            state = state, contentPadding = contentPadding,
+            verticalArrangement = verticalArrangement, horizontalAlignment = horizontalAlignment, content = content,
+        )
+        if (state.canScrollBackward || state.canScrollForward) Box(Modifier.matchParentSize()) {
+            VerticalScrollbar(rememberScrollbarAdapter(state),
+                Modifier.align(Alignment.CenterEnd).fillMaxHeight().padding(horizontal = 2.dp), style = scrollBarStyle())
+        }
+    }
+}
+
+/** Plain scrollable content, including short dialogs. The scrollbar never changes the content's height. */
+@Composable
+fun VScrollBox(
+    modifier: Modifier = Modifier,
+    state: ScrollState = rememberScrollState(),
+    contentAlignment: Alignment = Alignment.TopStart,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    Box(modifier, propagateMinConstraints = true) {
+        Box(Modifier.fillMaxWidth().padding(end = 12.dp).dragToScroll(state, Orientation.Vertical).verticalScroll(state),
+            contentAlignment = contentAlignment, content = content)
+        if (state.canScrollBackward || state.canScrollForward) Box(Modifier.matchParentSize()) {
+            VerticalScrollbar(rememberScrollbarAdapter(state),
+                Modifier.align(Alignment.CenterEnd).fillMaxHeight().padding(horizontal = 2.dp), style = scrollBarStyle())
+        }
+    }
 }
 
 /** YouTube thumbnails come in many sizes; ask for a crisp square one. */
@@ -142,16 +268,16 @@ fun SectionTitle(text: String, modifier: Modifier = Modifier, action: (@Composab
 fun Loading(modifier: Modifier = Modifier.fillMaxSize()) = Box(modifier, contentAlignment = Alignment.Center) { CircularProgressIndicator() }
 
 @Composable
-fun ErrorBox(message: String, retry: (() -> Unit)? = null) = Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp), contentAlignment = Alignment.Center) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+fun ErrorBox(message: String, retry: (() -> Unit)? = null) = VScrollBox(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(message, color = MaterialTheme.colorScheme.error)
         if (retry != null) TextButton(retry) { Text("Retry") }
     }
 }
 
 @Composable
-fun EmptyBox(message: String, icon: ImageVector = Icons.Default.MusicNote) = Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp), contentAlignment = Alignment.Center) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+fun EmptyBox(message: String, icon: ImageVector = Icons.Default.MusicNote) = VScrollBox(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Icon(icon, null, Modifier.size(48.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
@@ -389,31 +515,26 @@ fun LazyListScope.carousel(title: String, items: List<YTItem>, onMore: (() -> Un
 }
 
 /**
- * Horizontal row usable without a trackpad: drag with mouse or touch screen (desktop scrollable ignores
- * those), arrow buttons on hover, and a scrollbar.
+ * Horizontal row usable without a trackpad: drag with mouse or touch screen, arrow buttons on hover,
+ * and a scrollbar. Vertical gestures belong to the surrounding page.
  */
 @Composable
 fun HScrollRow(
     contentPadding: androidx.compose.foundation.layout.PaddingValues,
     arrangement: Arrangement.Horizontal = Arrangement.Start,
+    state: LazyListState = rememberLazyListState(),
     content: LazyListScope.() -> Unit,
 ) {
-    val state = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    val fling = ScrollableDefaults.flingBehavior()
     val hover = remember { MutableInteractionSource() }
     val hovered by hover.collectIsHoveredAsState()
     BoxWithConstraints(Modifier.fillMaxWidth().hoverable(hover)) {
         val page = constraints.maxWidth * 0.8f
         LazyRow(
-            Modifier.fillMaxWidth().padding(bottom = 10.dp).draggable(
-                rememberDraggableState { state.dispatchRawDelta(-it) },
-                Orientation.Horizontal,
-                onDragStopped = { v -> state.scroll { with(fling) { performFling(-v) } } },
-            ),
+            Modifier.fillMaxWidth().padding(bottom = 10.dp).dragToScroll(state, Orientation.Horizontal),
             state, contentPadding, horizontalArrangement = arrangement, content = content,
         )
-        HorizontalScrollbar(rememberScrollbarAdapter(state), Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 16.dp))
+        HorizontalScrollbar(rememberScrollbarAdapter(state), Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 16.dp), style = scrollBarStyle())
         @Composable
         fun Arrow(show: Boolean, icon: ImageVector, label: String, align: Alignment, dir: Float) =
             AnimatedVisibility(show, Modifier.align(align).padding(horizontal = 4.dp, vertical = 0.dp), enter = fadeIn(), exit = fadeOut()) {

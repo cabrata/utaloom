@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -63,7 +62,7 @@ import com.utaloom.together.toSong
 fun TogetherScreen() {
     val st by ListenTogether.state.collectAsState()
     val settings by Stores.settings.state.collectAsState()
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    VScrollColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Icon(Icons.Default.Groups, null, Modifier.size(32.dp), tint = MaterialTheme.colorScheme.primary)
@@ -235,7 +234,7 @@ private fun Logs(logs: List<String>) {
             LaunchedEffect(logs.size) { if (logs.isNotEmpty()) list.scrollToItem(logs.lastIndex) }
             Card(Modifier.fillMaxWidth()) {
                 SelectionContainer {
-                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 280.dp).padding(12.dp), state = list) {
+                    VScrollColumn(Modifier.fillMaxWidth().heightIn(max = 280.dp).padding(12.dp), state = list) {
                         items(logs) { Text(it, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace) }
                     }
                 }
