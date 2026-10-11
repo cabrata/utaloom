@@ -41,7 +41,9 @@ internal fun runApp(exitProcessOnExit: Boolean) {
         var fullscreen by remember { mutableStateOf(false) }
         fun setFullscreen(enabled: Boolean) {
             if (enabled == fullscreen) return
-            val w = awtWindow
+            // ponytail: the native placement juggling below works around X11 window managers. On Windows AWT's
+            // exclusive fullscreen is synchronous and re-entering it crashes (realFSWindow null), so only Linux uses it.
+            val w = awtWindow?.takeIf { isLinux }
             fullscreen = enabled
             restoreRequest++
             if (enabled) {
@@ -72,7 +74,7 @@ internal fun runApp(exitProcessOnExit: Boolean) {
                     w.placement = previousPlacement
                 }
                 windowState.placement = previousPlacement
-                restoreTo = previousPlacement to previousBounds
+                if (w != null) restoreTo = previousPlacement to previousBounds
                 previousBounds = null
             }
         }
@@ -167,7 +169,7 @@ internal fun runApp(exitProcessOnExit: Boolean) {
             SideEffect {
                 awtWindow = window
                 // ponytail: Compose 1.12.1 doesn't clear fullscreen on maximize; remove when its native transition is fixed.
-                if (windowState.placement == WindowPlacement.Maximized && window.placement == WindowPlacement.Fullscreen) {
+                if (isLinux && windowState.placement == WindowPlacement.Maximized && window.placement == WindowPlacement.Fullscreen) {
                     window.placement = WindowPlacement.Floating
                     window.placement = WindowPlacement.Maximized
                 }
@@ -176,6 +178,8 @@ internal fun runApp(exitProcessOnExit: Boolean) {
         }
     }
 }
+
+private val isLinux = System.getProperty("os.name").orEmpty().lowercase().contains("linux")
 
 /** Global media shortcuts. Ignored while typing in a text field (those consume the events first). */
 private fun shortcut(e: KeyEvent): Boolean {

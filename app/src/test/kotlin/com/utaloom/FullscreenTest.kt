@@ -27,7 +27,7 @@ class FullscreenTest {
     @Test
     @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     fun playerControlsAndKeyboardRestoreWindow() {
-        assumeTrue("Needs Linux graphical display and VLC", !GraphicsEnvironment.isHeadless() && NativeLibs.discoverVlc() == null && System.getProperty("os.name").lowercase().contains("linux"))
+        assumeTrue("Needs a graphical display and VLC", !GraphicsEnvironment.isHeadless() && NativeLibs.discoverVlc() == null)
         val settings = Stores.settings.value
         val queue = Stores.queue.value
         Stores.settings.update { it.copy(minimizeToTray = false, visitorData = "fullscreen-test", lyricsDisabled = it.lyricsProviderOrder.toSet()) }
