@@ -1,5 +1,11 @@
 # Changelog
 
+## [d5d1dfd] - 2026-10-11
+
+## Features
+
+* Auto-generate AI changelog on push and release (d5d1dfd)
+
 ## [v1.3.0] - 2026-10-11
 
 ### Features
