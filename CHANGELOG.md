@@ -1,5 +1,10 @@
 # Changelog
 
+## [774a4e1] - 2026-10-11
+
+### Fixes
+- **audio**: Resolve Windows libvlccore loading and Compose warnings (774a4e1)
+
 ## [d5d1dfd] - 2026-10-11
 
 ## Features
