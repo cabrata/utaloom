@@ -1,5 +1,13 @@
 # Changelog
 
+## [56ff246] - 2026-10-11
+
+## [Unreleased]
+
+### Fixed
+
+- **CI:** Hardened the AI changelog generator against chatty model output, so conversational or otherwise malformed responses from the model no longer corrupt or break generated changelog entries. (`56ff246`)
+
 ## [08410a3] - 2026-10-11
 
 I'll take a look at this commit to understand what changed.
