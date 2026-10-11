@@ -46,6 +46,7 @@ jobs:
             Start-Process -FilePath $installer -ArgumentList "/S" -Wait
           }
       - name: Test
+        timeout-minutes: 15
         shell: bash
         env:
           UTALOOM_WM_ARTIFACTS: ${{ github.workspace }}/app/build/acceptance/fullscreen

@@ -180,8 +180,9 @@ tasks.register<JavaExec>("togetherAcceptance") {
 // Keep tests away from the user's real library/settings.
 tasks.withType<Test>().configureEach {
     environment("XDG_DATA_HOME", layout.buildDirectory.dir("test-data").get().asFile.absolutePath)
-    // CI keeps no reports on failure, so print the real assertion message and test output to the log.
+    // Show the active test and real errors so native/network hangs are visible in CI.
     testLogging {
+        events("started", "passed", "skipped", "failed")
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
         showStandardStreams = true
     }
