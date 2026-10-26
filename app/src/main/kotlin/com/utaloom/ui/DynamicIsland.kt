@@ -80,7 +80,7 @@ internal fun glassHighlight(phase: Float) = Offset(phase, phase * 0.6f - 0.3f)
 
 @Composable
 @OptIn(ExperimentalComposeUiApi::class)
-fun DynamicIsland(onShowMain: () -> Unit, onClose: () -> Unit, onSizeChange: (DpSize) -> Unit = {}) {
+fun DynamicIsland(onShowMain: () -> Unit, onClose: () -> Unit, onExpandedChange: (Boolean) -> Unit = {}) {
     val state by Player.state.collectAsState()
     val library by Stores.library.state.collectAsState()
     val settings by Stores.settings.state.collectAsState()
@@ -110,7 +110,7 @@ fun DynamicIsland(onShowMain: () -> Unit, onClose: () -> Unit, onSizeChange: (Dp
     val barPhase = rememberInfiniteTransition(label = "equalizer").animateFloat(
         0f, 1f, infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "barPhase",
     )
-    LaunchedEffect(width, height) { onSizeChange(DpSize(width, height)) }
+    LaunchedEffect(expanded) { onExpandedChange(expanded) }
     val statusText = when (status) {
         IslandPlaybackStatus.EMPTY -> "Nothing playing"
         IslandPlaybackStatus.BUFFERING -> "Buffering"

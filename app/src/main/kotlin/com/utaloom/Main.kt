@@ -265,16 +265,21 @@ internal fun runApp(exitProcessOnExit: Boolean) {
             resizable = false,
             alwaysOnTop = settings.dynamicIslandAlwaysOnTop,
         ) {
-            window.background = java.awt.Color(0, 0, 0, 0)
+            LaunchedEffect(window) {
+                if (window.background != java.awt.Color(0, 0, 0, 0)) {
+                    window.background = java.awt.Color(0, 0, 0, 0)
+                }
+            }
             LaunchedEffect(window, islandState.size, settings.dynamicIslandMonitor, settings.dynamicIslandTopOffset) {
-                kotlinx.coroutines.delay(16)
-                positionDynamicIsland(window, settings.dynamicIslandMonitor, settings.dynamicIslandTopOffset)
+                javax.swing.SwingUtilities.invokeLater {
+                    positionDynamicIsland(window, settings.dynamicIslandMonitor, settings.dynamicIslandTopOffset)
+                }
             }
             UtaloomTheme(DefaultSeed, dark = true) {
                 DynamicIsland(
                     onShowMain = ::showMain,
                     onClose = DesktopWindows::closeIsland,
-                    onSizeChange = { islandState.size = it },
+                    onExpandedChange = { islandState.size = com.utaloom.ui.islandSize(it) },
                 )
             }
         }

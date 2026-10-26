@@ -217,7 +217,10 @@ fun positionDynamicIsland(
     topOffset: Int = DEFAULT_TOP_OFFSET,
 ) {
     runCatching {
-        window.location = calculateIslandPosition(window, targetMonitor, topOffset)
+        val target = calculateIslandPosition(window, targetMonitor, topOffset)
+        if (window.location != target) {
+            window.location = target
+        }
     }.onFailure {
         runCatching { window.setLocationRelativeTo(null) }
     }

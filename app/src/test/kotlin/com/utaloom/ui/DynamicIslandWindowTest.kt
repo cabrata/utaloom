@@ -63,6 +63,10 @@ class DynamicIslandWindowTest {
 
             click(overlay, "Dynamic Island. Island acceptance by Utaloom, Paused")
             await("expanded 640x340 window", stableMillis = 250) { onEdt { overlay.size.width == 640 && overlay.size.height == 340 } }
+            click(overlay, "Dynamic Island. Island acceptance by Utaloom, Paused")
+            await("collapsed 304x64 window", stableMillis = 250) { onEdt { overlay.size.width == 304 && overlay.size.height == 64 } }
+            click(overlay, "Dynamic Island. Island acceptance by Utaloom, Paused")
+            await("re-expanded 640x340 window", stableMillis = 250) { onEdt { overlay.size.width == 640 && overlay.size.height == 340 } }
             listOf("Like", "Previous", "Play", "Open Utaloom", "Hide Dynamic Island").forEach { name ->
                 await("expanded control $name") { onEdt { find(overlay, name)?.accessibleAction != null } }
             }
