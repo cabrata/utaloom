@@ -23,6 +23,16 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.util.concurrent.TimeUnit
 
+data class ActiveDownload(val song: Song, val progress: Float? = null) {
+    val id get() = song.id
+    val title get() = song.title
+    val boundedProgress get() = progress?.coerceIn(0f, 1f)
+}
+
+// ponytail: in-memory download progress -> skipped: persistent resume/worker IPC, add when background download daemon exists.
+internal fun downloadProgress(downloadedBytes: Long, totalBytes: Long?): Float? =
+    totalBytes?.takeIf { it > 0 }?.let { (downloadedBytes.toFloat() / it).coerceIn(0f, 1f) }
+
 object Downloads {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val http = OkHttpClient.Builder().callTimeout(2, TimeUnit.MINUTES).build()
@@ -31,6 +41,10 @@ object Downloads {
     val progress = _progress.asStateFlow()
     private val _errors = MutableStateFlow<Map<String, String>>(emptyMap())
     val errors = _errors.asStateFlow()
+    private val _activeDownloads = MutableStateFlow<Map<String, ActiveDownload>>(emptyMap())
+    val activeDownloads = _activeDownloads.asStateFlow()
+    private val _activeSongs = MutableStateFlow<Map<String, Song>>(emptyMap())
+    val activeSongs = _activeSongs.asStateFlow()
 
     fun isDownloaded(id: String) = Stores.library.value.downloaded[id]?.let { File(it).exists() } == true
     fun clearErrors() { _errors.value = emptyMap() }
@@ -40,6 +54,8 @@ object Downloads {
         synchronized(this) {
             if (song.id in _progress.value) return@forEach
             _progress.update { it + (song.id to 0f) }
+            _activeDownloads.update { it + (song.id to ActiveDownload(song)) }
+            _activeSongs.update { it + (song.id to song) }
         }
         scope.launch {
             try {
@@ -51,6 +67,8 @@ object Downloads {
                 _errors.update { it + (song.id to "Couldn't download ${song.title}. Check your connection and retry.") }
             } finally {
                 _progress.update { it - song.id }
+                _activeDownloads.update { it - song.id }
+                _activeSongs.update { it - song.id }
             }
         }
     }
@@ -92,7 +110,12 @@ object Downloads {
                     }
                     if (result.first == 0L) break
                     pos += result.first
-                    if (total != null) _progress.update { it + (song.id to (pos.toFloat() / total).coerceIn(0f, 1f)) }
+                    downloadProgress(pos, total)?.let { progress ->
+                        _progress.update { it + (song.id to progress) }
+                        _activeDownloads.update { active ->
+                            active[song.id]?.let { active + (song.id to it.copy(progress = progress)) } ?: active
+                        }
+                    }
                     if (result.second || (total == null && result.first < chunk)) break
                 }
             }

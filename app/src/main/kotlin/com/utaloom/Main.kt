@@ -24,7 +24,7 @@ import com.utaloom.ui.MiniPlayer
 import com.utaloom.ui.DynamicIsland
 import com.utaloom.ui.DefaultSeed
 import com.utaloom.ui.UtaloomTheme
-import com.utaloom.ui.positionDynamicIsland
+import com.utaloom.platform.positionDynamicIsland
 
 fun main() = runApp(exitProcessOnExit = true)
 
@@ -266,9 +266,9 @@ internal fun runApp(exitProcessOnExit: Boolean) {
             alwaysOnTop = settings.dynamicIslandAlwaysOnTop,
         ) {
             window.background = java.awt.Color(0, 0, 0, 0)
-            LaunchedEffect(window, islandState.size) {
+            LaunchedEffect(window, islandState.size, settings.dynamicIslandMonitor, settings.dynamicIslandTopOffset) {
                 kotlinx.coroutines.delay(16)
-                positionDynamicIsland(window)
+                positionDynamicIsland(window, settings.dynamicIslandMonitor, settings.dynamicIslandTopOffset)
             }
             UtaloomTheme(DefaultSeed, dark = true) {
                 DynamicIsland(

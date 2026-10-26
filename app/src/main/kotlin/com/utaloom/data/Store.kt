@@ -123,6 +123,11 @@ data class Settings(
     val miniPlayerAlwaysOnTop: Boolean = true,
     val dynamicIslandEnabled: Boolean = true,
     val dynamicIslandAlwaysOnTop: Boolean = true,
+    val dynamicIslandLyrics: Boolean = true,
+    val dynamicIslandDownloads: Boolean = true,
+    val dynamicIslandQueue: Boolean = true,
+    val dynamicIslandMonitor: String = "active",
+    val dynamicIslandTopOffset: Int = 8,
     val globalHotkeysEnabled: Boolean = false,
     val globalHotkeys: Map<String, String> = defaultGlobalHotkeys,
 ) {

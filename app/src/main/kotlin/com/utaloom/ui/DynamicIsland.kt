@@ -34,16 +34,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import com.utaloom.data.Library
+import com.utaloom.data.Settings
+import com.utaloom.data.Song
 import com.utaloom.data.Stores
+import com.utaloom.lyrics.LyricsRepository
+import com.utaloom.playback.Downloads
 import com.utaloom.playback.Player
 import com.utaloom.playback.PlayerState
-import java.awt.Dimension
-import java.awt.GraphicsEnvironment
-import java.awt.KeyboardFocusManager
-import java.awt.Point
-import java.awt.Rectangle
-import java.awt.Toolkit
-import java.awt.Window
+import com.utaloom.shared.Lyrics
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 internal enum class IslandPlaybackStatus { EMPTY, BUFFERING, PLAYING, PAUSED, ERROR }
 
@@ -55,32 +56,15 @@ internal fun islandPlaybackStatus(state: PlayerState): IslandPlaybackStatus = wh
     else -> IslandPlaybackStatus.PAUSED
 }
 
-internal fun islandSize(expanded: Boolean) = if (expanded) DpSize(420.dp, 196.dp) else DpSize(304.dp, 64.dp)
-
-internal fun islandTopCenter(bounds: Rectangle, insets: java.awt.Insets, size: Dimension): Point {
-    val left = bounds.x + insets.left
-    val usableWidth = (bounds.width - insets.left - insets.right).coerceAtLeast(size.width)
-    return Point(left + (usableWidth - size.width) / 2, bounds.y + insets.top + 8)
-}
-
-/** Positions against the active screen, then the primary screen. Unsupported desktop APIs fall back safely. */
-fun positionDynamicIsland(window: Window) {
-    runCatching {
-        val active = KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow
-        val configuration = active?.takeUnless { it === window }?.graphicsConfiguration
-            ?: GraphicsEnvironment.getLocalGraphicsEnvironment().defaultScreenDevice.defaultConfiguration
-        val insets = Toolkit.getDefaultToolkit().getScreenInsets(configuration)
-        window.location = islandTopCenter(configuration.bounds, insets, window.size)
-    }.onFailure {
-        runCatching { window.setLocationRelativeTo(null) }
-    }
-}
+internal fun islandSize(expanded: Boolean) = if (expanded) DpSize(420.dp, 340.dp) else DpSize(304.dp, 64.dp)
 
 @Composable
 @OptIn(ExperimentalComposeUiApi::class)
 fun DynamicIsland(onShowMain: () -> Unit, onClose: () -> Unit, onSizeChange: (DpSize) -> Unit = {}) {
     val state by Player.state.collectAsState()
     val library by Stores.library.state.collectAsState()
+    val settings by Stores.settings.state.collectAsState()
+    val downloads by Downloads.activeDownloads.collectAsState()
     val song = state.current
     val status = islandPlaybackStatus(state)
     val guest = Player.remoteControlled
@@ -128,16 +112,26 @@ fun DynamicIsland(onShowMain: () -> Unit, onClose: () -> Unit, onSizeChange: (Dp
                 }
                 .clickable(interactionSource = interaction, indication = null) { pinnedOpen = !pinnedOpen },
         ) {
-            if (expanded) ExpandedIsland(state, statusText, library.liked.any { it.id == song?.id }, guest, onShowMain, onClose)
-            else CompactIsland(state, statusText)
+            if (expanded) ExpandedIsland(state, statusText, library.liked.any { it.id == song?.id }, guest, settings, downloads.values.toList(), onShowMain, onClose)
+            else CompactIsland(state, statusText, settings.dynamicIslandLyrics, settings.lyricsProviders, settings.dynamicIslandDownloads, downloads.values.toList())
         }
     }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
 }
 
 @Composable
-private fun CompactIsland(state: PlayerState, statusText: String) {
+private fun CompactIsland(
+    state: PlayerState,
+    statusText: String,
+    showLyrics: Boolean,
+    lyricsProviders: List<String>,
+    showDownloads: Boolean,
+    downloads: List<com.utaloom.playback.ActiveDownload>,
+) {
     val song = state.current
+    val lyricState = rememberIslandLyrics(song, showLyrics, lyricsProviders)
+    val lyricLine = (lyricState as? IslandLyrics.Ready)?.lyrics?.currentLine(state.positionMs)
+    val download = downloads.firstOrNull().takeIf { showDownloads }
     Row(
         Modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -147,9 +141,14 @@ private fun CompactIsland(state: PlayerState, statusText: String) {
             if (song != null) Thumb(song.thumbnail, 48.dp) else Icon(Icons.Default.MusicNote, null, tint = Color(0xFFD8D8D8))
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
-            Text(song?.title ?: "Utaloom", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
+            Text(download?.title ?: song?.title ?: "Utaloom", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
             Text(
-                if (song == null || state.error != null) statusText else song.artistText,
+                when {
+                    download != null -> "Downloading ${download.title}"
+                    lyricLine != null && lyricLine != song?.title -> lyricLine
+                    song == null || state.error != null -> statusText
+                    else -> song.artistText
+                },
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 color = Color(0xFFB8B8B8),
@@ -157,6 +156,13 @@ private fun CompactIsland(state: PlayerState, statusText: String) {
             )
         }
         when {
+            download != null -> CircularProgressIndicator(
+                progress = { download.boundedProgress ?: 0f },
+                modifier = Modifier.size(22.dp).semantics { contentDescription = download.boundedProgress?.let { "Download ${(it * 100).toInt()} percent" } ?: "Downloading" },
+                color = Color.White,
+                trackColor = Color(0xFF555555),
+                strokeWidth = 2.dp,
+            )
             state.error != null -> Icon(Icons.Default.ErrorOutline, null, tint = Color(0xFFFFB4AB))
             state.isBuffering -> CircularProgressIndicator(Modifier.size(22.dp), color = Color.White, strokeWidth = 2.dp)
             state.current != null -> Icon(if (state.isPlaying) Icons.Default.GraphicEq else Icons.Default.PlayArrow, null, tint = Color.White)
@@ -171,11 +177,14 @@ private fun ExpandedIsland(
     statusText: String,
     liked: Boolean,
     guest: Boolean,
+    settings: Settings,
+    downloads: List<com.utaloom.playback.ActiveDownload>,
     onShowMain: () -> Unit,
     onClose: () -> Unit,
 ) {
     val song = state.current
-    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    val lyricState = rememberIslandLyrics(song, settings.dynamicIslandLyrics, settings.lyricsProviders)
+    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(Modifier.size(58.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFF232323)), contentAlignment = Alignment.Center) {
                 if (song != null) Thumb(song.thumbnail, 58.dp) else Icon(Icons.Default.MusicNote, "No artwork", tint = Color(0xFFD8D8D8))
@@ -196,6 +205,43 @@ private fun ExpandedIsland(
             }
             IslandIconButton("Open Utaloom", onShowMain) { Icon(Icons.AutoMirrored.Filled.OpenInNew, null) }
             IslandIconButton("Hide Dynamic Island", onClose) { Icon(Icons.Default.Close, null) }
+        }
+
+        if (settings.dynamicIslandLyrics && song != null) {
+            val lyricText = when (lyricState) {
+                IslandLyrics.Loading -> "Loading lyrics"
+                IslandLyrics.Unavailable -> "Synced lyrics unavailable"
+                IslandLyrics.Failed -> "Lyrics unavailable"
+                is IslandLyrics.Ready -> lyricState.lyrics.currentLine(state.positionMs) ?: "Lyrics start soon"
+                IslandLyrics.Hidden -> ""
+            }
+            Text(lyricText, Modifier.fillMaxWidth().semantics { contentDescription = "Lyrics: $lyricText" }, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium, color = if (lyricState is IslandLyrics.Ready) Color.White else Color(0xFFB8B8B8))
+        }
+
+        if (settings.dynamicIslandDownloads && downloads.isNotEmpty()) {
+            downloads.take(2).forEach { download ->
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(Icons.Default.Download, null, Modifier.size(16.dp), tint = Color(0xFFB8B8B8))
+                    Text(download.title, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+                    Text(download.boundedProgress?.let { "${(it * 100).toInt()}%" } ?: "Starting", color = Color(0xFFB8B8B8), style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+
+        if (settings.dynamicIslandQueue) {
+            state.queue.drop(state.index + 1).take(3).forEachIndexed { offset, queued ->
+                TextButton(
+                    onClick = { Player.selectQueueIndex(state.index + offset + 1) },
+                    enabled = !guest,
+                    modifier = Modifier.fillMaxWidth().height(30.dp).semantics { contentDescription = "Play next: ${queued.title} by ${queued.artistText}" },
+                    contentPadding = PaddingValues(horizontal = 4.dp),
+                ) {
+                    Icon(Icons.Default.QueueMusic, null, Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(queued.title, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(queued.artistText, maxLines = 1, overflow = TextOverflow.Ellipsis, color = Color(0xFFB8B8B8), style = MaterialTheme.typography.labelSmall)
+                }
+            }
         }
 
         val duration = state.durationMs.coerceAtLeast(1)
@@ -238,6 +284,39 @@ private fun ExpandedIsland(
             IslandIconButton("Open main window", onShowMain) { Icon(Icons.AutoMirrored.Filled.OpenInNew, null) }
         }
     }
+}
+
+private sealed interface IslandLyrics {
+    data object Hidden : IslandLyrics
+    data object Loading : IslandLyrics
+    data object Unavailable : IslandLyrics
+    data object Failed : IslandLyrics
+    data class Ready(val lyrics: Lyrics) : IslandLyrics
+}
+
+internal fun Lyrics.currentLine(positionMs: Long): String? {
+    if (!synced) return null
+    return lines.getOrNull(currentIndex(positionMs))?.text?.trim()?.takeIf(String::isNotEmpty)
+}
+
+@Composable
+private fun rememberIslandLyrics(song: Song?, enabled: Boolean, providers: List<String> = Stores.settings.value.lyricsProviders): IslandLyrics {
+    val result by produceState<IslandLyrics>(if (enabled && song != null) IslandLyrics.Loading else IslandLyrics.Hidden, song?.id, enabled, providers) {
+        if (!enabled || song == null) {
+            value = IslandLyrics.Hidden
+            return@produceState
+        }
+        value = IslandLyrics.Loading
+        value = try {
+            val lyrics = withContext(Dispatchers.IO) { LyricsRepository.get(song, providers) }
+            if (lyrics?.synced == true) IslandLyrics.Ready(lyrics) else IslandLyrics.Unavailable
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            IslandLyrics.Failed
+        }
+    }
+    return result
 }
 
 @Composable

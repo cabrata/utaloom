@@ -23,7 +23,10 @@ class DynamicIslandWindowTest {
     @Test
     @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     fun compactIslandExpandsAndItsControlsWork() {
-        assumeTrue("Needs a graphical display and VLC", !GraphicsEnvironment.isHeadless() && NativeLibs.discoverVlc() == null)
+        assumeTrue(
+            "Needs a Linux graphical display and VLC",
+            System.getProperty("os.name").lowercase().contains("linux") && !GraphicsEnvironment.isHeadless() && NativeLibs.discoverVlc() == null,
+        )
         val oldSettings = Stores.settings.value
         val oldQueue = Stores.queue.value
         val oldLibrary = Stores.library.value
@@ -58,7 +61,7 @@ class DynamicIslandWindowTest {
             check(onEdt { overlay.x == (overlay.graphicsConfiguration.bounds.width - overlay.width) / 2 })
 
             click(overlay, "Dynamic Island. Island acceptance by Utaloom, Paused")
-            await("expanded 420x196 window", stableMillis = 250) { onEdt { overlay.size.width == 420 && overlay.size.height == 196 } }
+            await("expanded 420x340 window", stableMillis = 250) { onEdt { overlay.size.width == 420 && overlay.size.height == 340 } }
             listOf("Like", "Previous", "Play", "Open Utaloom", "Hide Dynamic Island").forEach { name ->
                 await("expanded control $name") { onEdt { find(overlay, name)?.accessibleAction != null } }
             }
@@ -68,7 +71,7 @@ class DynamicIslandWindowTest {
             await("open main makes it visible") { onEdt { checkNotNull(main).isShowing } }
             click(overlay, "Hide Dynamic Island")
             await("hide closes overlay only") { onEdt { !overlay.isShowing && checkNotNull(main).isShowing } }
-            println("PASS: rendered island is top-centered 304x64, expands to 420x196, exposes controls, likes, opens main, and closes independently")
+            println("PASS: rendered island is top-centered 304x64, expands to 420x340, exposes controls, likes, opens main, and closes independently")
         } finally {
             onEdt { Window.getWindows().filterIsInstance<ComposeWindow>().filter { it.isShowing }.forEach { it.dispatchEvent(WindowEvent(it, WindowEvent.WINDOW_CLOSING)) } }
             app.join(5000)

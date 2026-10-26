@@ -169,7 +169,12 @@ fun SettingsScreen(isMobile: Boolean = System.getProperty("java.vm.name") == "Da
                 Stores.settings.update { it.copy(dynamicIslandEnabled = v) }
                 if (v) com.utaloom.platform.DesktopWindows.showIsland() else com.utaloom.platform.DesktopWindows.closeIsland()
             }
-            SettingsToggle("Dynamic Island always on top", "Keep the overlay visible above other windows.", s.dynamicIslandAlwaysOnTop) { v -> Stores.settings.update { it.copy(dynamicIslandAlwaysOnTop = v) } }
+            IslandSettings(
+                settings = s,
+                onUpdateSettings = { updated -> Stores.settings.update { updated } },
+                queueEnabled = s.dynamicIslandQueue,
+                onQueueChange = { enabled -> Stores.settings.update { it.copy(dynamicIslandQueue = enabled) } },
+            )
         }
         item {
             Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp)) {

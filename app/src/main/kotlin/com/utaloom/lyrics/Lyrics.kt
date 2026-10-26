@@ -21,6 +21,7 @@ import io.ktor.client.request.parameter
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.abs
@@ -29,7 +30,11 @@ object LyricsRepository {
     /** Default provider order. */
     val providers = listOf("BetterLyrics", "LrcLib", "KuGou", "Paxsenix", "LyricsPlus", "Zemer", "YouTubeSubtitle", "YouTube")
 
-    private val cache = ConcurrentHashMap<String, Lyrics?>()
+    private data class CacheKey(val songId: String, val providers: List<String>)
+    private data class Cached(val lyrics: Lyrics?)
+
+    private val cache = ConcurrentHashMap<CacheKey, Cached>()
+    private val locks = ConcurrentHashMap<CacheKey, kotlinx.coroutines.sync.Mutex>()
 
     private val http by lazy {
         HttpClient(OkHttp) {
@@ -47,8 +52,19 @@ object LyricsRepository {
         val syncedLyrics: String? = null,
     )
 
-    suspend fun get(song: Song, providers: List<String>): Lyrics? {
-        cache[song.id]?.let { return it }
+    suspend fun get(song: Song, providers: List<String>): Lyrics? =
+        cached(song.id, providers) { load(song, providers) }
+
+    internal suspend fun cached(songId: String, providers: List<String>, loader: suspend () -> Lyrics?): Lyrics? {
+        val key = CacheKey(songId, providers.toList())
+        cache[key]?.let { return it.lyrics }
+        return locks.computeIfAbsent(key) { kotlinx.coroutines.sync.Mutex() }.withLock {
+            cache[key]?.let { return@withLock it.lyrics }
+            loader().also { cache[key] = Cached(it) }
+        }
+    }
+
+    private suspend fun load(song: Song, providers: List<String>): Lyrics? {
         var result: Lyrics? = null
         val title = clean(song.title)
         val artist = song.artists.joinToString()
@@ -71,14 +87,15 @@ object LyricsRepository {
             }.getOrNull()
             if (result != null) break
         }
-        if (result != null) cache[song.id] = result
         return result
     }
 
     private fun lrc(provider: String, r: Result<String>): Lyrics? =
         r.getOrNull()?.takeIf { it.isNotBlank() }?.let { parseLrc(provider, it) }?.takeIf { it.lines.isNotEmpty() }
 
-    fun invalidate(id: String) = cache.remove(id)
+    fun invalidate(id: String) {
+        cache.keys.removeIf { it.songId == id }
+    }
 
     private val noise = Regex(
         """\s*[(\[](?=[^)\]]*(official|video|audio|lyric|visualizer|remaster|feat\.|ft\.))[^)\]]*[)\]]""",

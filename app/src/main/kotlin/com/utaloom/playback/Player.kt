@@ -430,11 +430,18 @@ object Player {
         load(play = true)
     }
 
+    @Synchronized fun selectQueueIndex(index: Int): Boolean {
+        if (remoteControlled || index !in _state.value.queue.indices || index == _state.value.index) return false
+        skipTo(index)
+        return true
+    }
+
     @Synchronized fun skipTo(index: Int, fromRemote: Boolean = false) {
         if (remoteControlled && !fromRemote) return
         if (index !in _state.value.queue.indices) return
         _state.update { it.copy(index = index) }
         load(play = !fromRemote || playWhenReady, notify = !fromRemote)
+        if (_state.value.queue.size - _state.value.index < 4) radioJob = scope.launch { extendRadio() }
     }
 
     @Synchronized fun stop(fromRemote: Boolean = false) {
