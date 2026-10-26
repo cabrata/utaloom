@@ -42,6 +42,7 @@ class DynamicIslandWindowTest {
         }
         Stores.queue.update { PersistedQueue(listOf(song), 0, title = "Island acceptance") }
         Stores.library.update { LibraryState() }
+        com.utaloom.platform.DesktopWindows.showIsland()
         val app = thread(name = "dynamic-island-test-app", isDaemon = true) { runApp(exitProcessOnExit = false) }
         var main: ComposeWindow? = null
         var island: ComposeWindow? = null
@@ -79,6 +80,7 @@ class DynamicIslandWindowTest {
             Stores.queue.update { oldQueue }
             Stores.library.update { oldLibrary }
             Stores.flushAll()
+            com.utaloom.platform.DesktopWindows.showIsland()
         }
     }
 

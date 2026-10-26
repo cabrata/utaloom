@@ -171,7 +171,8 @@ fun DynamicIsland(onShowMain: () -> Unit, onClose: () -> Unit, onSizeChange: (Dp
             }
         }
     }
-    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+    // Overlay must never steal keyboard focus from the app or other windows; focus arrives on hover/click.
+    LaunchedEffect(hovered, pinnedOpen) { if (hovered || pinnedOpen) runCatching { focusRequester.requestFocus() } }
 }
 
 @Composable

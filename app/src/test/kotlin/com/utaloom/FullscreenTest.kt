@@ -33,13 +33,13 @@ class FullscreenTest {
         val linux = System.getProperty("os.name").lowercase().contains("linux")
         val settings = Stores.settings.value
         val queue = Stores.queue.value
-        Stores.settings.update { it.copy(minimizeToTray = false, visitorData = "fullscreen-test", lyricsDisabled = it.lyricsProviderOrder.toSet()) }
+        Stores.settings.update { it.copy(minimizeToTray = false, visitorData = "fullscreen-test", lyricsDisabled = it.lyricsProviderOrder.toSet(), dynamicIslandEnabled = false) }
         Stores.queue.update { PersistedQueue(listOf(Song("screen00001", "Fullscreen test", listOf("Utaloom"))), title = "Fullscreen test") }
         Nav.root(Screen.Settings)
         val app = thread(name = "fullscreen-test-app", isDaemon = true) { runApp(exitProcessOnExit = false) }
         var window: ComposeWindow? = null
         try {
-            await("Desktop window") { onEdt { Window.getWindows().filterIsInstance<ComposeWindow>().firstOrNull { it.isShowing }?.also { window = it } != null } }
+            await("Desktop window") { onEdt { Window.getWindows().filterIsInstance<ComposeWindow>().firstOrNull { it.isShowing && it.title != "Utaloom Dynamic Island" && it.title != "Utaloom Mini player" }?.also { window = it } != null } }
             val w = checkNotNull(window)
             onEdt { w.renderImmediately() }
             Thread.sleep(500)
