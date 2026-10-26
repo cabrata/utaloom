@@ -121,6 +121,8 @@ data class Settings(
     val lyricsTranslationKey: String = "",
     val lyricsTranslationProvider: String = "deepl",
     val miniPlayerAlwaysOnTop: Boolean = true,
+    val dynamicIslandEnabled: Boolean = true,
+    val dynamicIslandAlwaysOnTop: Boolean = true,
     val globalHotkeysEnabled: Boolean = false,
     val globalHotkeys: Map<String, String> = defaultGlobalHotkeys,
 ) {

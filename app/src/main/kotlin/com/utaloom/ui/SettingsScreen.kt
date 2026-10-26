@@ -159,8 +159,17 @@ fun SettingsScreen(isMobile: Boolean = System.getProperty("java.vm.name") == "Da
         if (!isMobile) item {
             FlowRow(Modifier.padding(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(com.utaloom.platform.DesktopWindows::showMini) { Text("Open mini player") }
+                OutlinedButton({
+                    Stores.settings.update { it.copy(dynamicIslandEnabled = true) }
+                    com.utaloom.platform.DesktopWindows.showIsland()
+                }) { Text("Show Dynamic Island") }
             }
             SettingsToggle("Mini player always on top", "Keep the small player above other windows. Closing it keeps your music playing.", s.miniPlayerAlwaysOnTop) { v -> Stores.settings.update { it.copy(miniPlayerAlwaysOnTop = v) } }
+            SettingsToggle("Dynamic Island", "Show compact playback status and controls at the top of your screen.", s.dynamicIslandEnabled) { v ->
+                Stores.settings.update { it.copy(dynamicIslandEnabled = v) }
+                if (v) com.utaloom.platform.DesktopWindows.showIsland() else com.utaloom.platform.DesktopWindows.closeIsland()
+            }
+            SettingsToggle("Dynamic Island always on top", "Keep the overlay visible above other windows.", s.dynamicIslandAlwaysOnTop) { v -> Stores.settings.update { it.copy(dynamicIslandAlwaysOnTop = v) } }
         }
         item {
             Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp)) {

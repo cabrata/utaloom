@@ -21,6 +21,10 @@ import com.utaloom.ui.Nav
 import com.utaloom.ui.UtaloomApp
 import com.utaloom.ui.applySession
 import com.utaloom.ui.MiniPlayer
+import com.utaloom.ui.DynamicIsland
+import com.utaloom.ui.DefaultSeed
+import com.utaloom.ui.UtaloomTheme
+import com.utaloom.ui.positionDynamicIsland
 
 fun main() = runApp(exitProcessOnExit = true)
 
@@ -39,7 +43,9 @@ internal fun runApp(exitProcessOnExit: Boolean) {
         var visible by remember { mutableStateOf(true) }
         val settings by Stores.settings.state.collectAsState()
         val miniVisible by DesktopWindows.miniVisible.collectAsState()
+        val islandVisible by DesktopWindows.islandVisible.collectAsState()
         val miniState = rememberWindowState(size = DpSize(380.dp, 320.dp))
+        val islandState = rememberWindowState(size = com.utaloom.ui.islandSize(false))
         val windowState = rememberWindowState(size = DpSize(1280.dp, 820.dp))
         var previousPlacement by remember { mutableStateOf(WindowPlacement.Floating) }
         // Restoring bounds needs the outer rectangle: a request made while the window is still undecorated
@@ -120,6 +126,7 @@ internal fun runApp(exitProcessOnExit: Boolean) {
         fun quit() {
             PlaylistImports.cancel(); ListenTogether.leaveRoom(); GlobalHotkeys.stop(); Scrobbling.stop()
             DiscordPresence.stop(); ListeningStats.stop(); DesktopWindows.closeMini()
+            DesktopWindows.closeIsland()
             Mpris.stop(); Player.release(); Stores.flushAll(); exitApplication()
         }
         DisposableEffect(Unit) {
@@ -143,6 +150,13 @@ internal fun runApp(exitProcessOnExit: Boolean) {
             Separator()
             Item("Show Utaloom", onClick = { visible = true })
             Item("Mini player", onClick = DesktopWindows::showMini)
+            Item(if (settings.dynamicIslandEnabled && islandVisible) "Hide Dynamic Island" else "Show Dynamic Island", onClick = {
+                if (settings.dynamicIslandEnabled && islandVisible) DesktopWindows.closeIsland()
+                else {
+                    if (!settings.dynamicIslandEnabled) Stores.settings.update { it.copy(dynamicIslandEnabled = true) }
+                    DesktopWindows.showIsland()
+                }
+            })
             Item("Quit", onClick = ::quit)
         })
 
@@ -240,6 +254,29 @@ internal fun runApp(exitProcessOnExit: Boolean) {
         ) {
             window.minimumSize = java.awt.Dimension(340, 310)
             MiniPlayer(::showMain)
+        }
+        if (settings.dynamicIslandEnabled && islandVisible) Window(
+            onCloseRequest = DesktopWindows::closeIsland,
+            state = islandState,
+            title = "Utaloom Dynamic Island",
+            icon = icon,
+            undecorated = true,
+            transparent = true,
+            resizable = false,
+            alwaysOnTop = settings.dynamicIslandAlwaysOnTop,
+        ) {
+            window.background = java.awt.Color(0, 0, 0, 0)
+            LaunchedEffect(window, islandState.size) {
+                kotlinx.coroutines.delay(16)
+                positionDynamicIsland(window)
+            }
+            UtaloomTheme(DefaultSeed, dark = true) {
+                DynamicIsland(
+                    onShowMain = ::showMain,
+                    onClose = DesktopWindows::closeIsland,
+                    onSizeChange = { islandState.size = it },
+                )
+            }
         }
     }
 }

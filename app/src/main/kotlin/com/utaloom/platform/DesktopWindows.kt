@@ -7,6 +7,10 @@ import kotlinx.coroutines.flow.asStateFlow
 object DesktopWindows {
     private val mini = MutableStateFlow(false)
     val miniVisible = mini.asStateFlow()
+    private val island = MutableStateFlow(true)
+    val islandVisible = island.asStateFlow()
     fun showMini() { mini.value = true }
     fun closeMini() { mini.value = false }
+    fun showIsland() { island.value = true }
+    fun closeIsland() { island.value = false }
 }
