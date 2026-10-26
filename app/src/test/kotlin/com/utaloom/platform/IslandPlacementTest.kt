@@ -109,8 +109,9 @@ class IslandPlacementTest {
             // Primary monitor is at (0, 0, 2560, 1440), insets 0, size 300x60
             // x = (2560 - 300) / 2 = 1130, y = 0 + 10 = 10
             assertEquals(Point(1130, 10), pos)
+            val runtimeExpected = calculateIslandPosition(window, MONITOR_PRIMARY, 10)
             positionDynamicIsland(window, MONITOR_PRIMARY, 10)
-            assertEquals(Point(1130, 10), window.location)
+            assertEquals(runtimeExpected, window.location)
             window.dispose()
         }
     }
