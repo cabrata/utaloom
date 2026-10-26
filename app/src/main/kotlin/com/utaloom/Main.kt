@@ -64,7 +64,7 @@ internal fun runApp(exitProcessOnExit: Boolean) {
             if (!isLinux) {
                 // Same as 1.2.0, which users found stable on Windows: let Compose drive the placement.
                 fullscreen = enabled
-                if (enabled) previousPlacement = windowState.placement
+                if (enabled && windowState.placement != WindowPlacement.Fullscreen) previousPlacement = windowState.placement
                 windowState.placement = if (enabled) WindowPlacement.Fullscreen else previousPlacement
                 return
             }

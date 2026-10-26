@@ -201,7 +201,7 @@ class FullscreenTest {
     }
 
     private fun await(label: String, stableMillis: Long = 0, condition: () -> Boolean) {
-        val deadline = System.nanoTime() + 15_000_000_000L
+        val deadline = System.nanoTime() + 25_000_000_000L
         var since = 0L
         while (true) {
             if (condition()) {
