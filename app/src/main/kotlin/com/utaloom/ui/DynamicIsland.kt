@@ -1,6 +1,8 @@
 package com.utaloom.ui
 
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -16,6 +18,7 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -31,6 +34,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -69,7 +73,7 @@ internal fun islandPlaybackStatus(state: PlayerState): IslandPlaybackStatus = wh
     else -> IslandPlaybackStatus.PAUSED
 }
 
-internal fun islandSize(expanded: Boolean) = if (expanded) DpSize(420.dp, 340.dp) else DpSize(304.dp, 64.dp)
+internal fun islandSize(expanded: Boolean) = if (expanded) DpSize(640.dp, 340.dp) else DpSize(304.dp, 64.dp)
 
 /** @param phase 0..1 looping phase; offsets the fake-refraction wobble. */
 internal fun glassHighlight(phase: Float) = Offset(phase, phase * 0.6f - 0.3f)
@@ -89,12 +93,18 @@ fun DynamicIsland(onShowMain: () -> Unit, onClose: () -> Unit, onSizeChange: (Dp
     val focusRequester = remember { FocusRequester() }
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
+    val pressed by interaction.collectIsPressedAsState()
     val expanded = pinnedOpen || hovered
     val targetSize = islandSize(expanded)
     val width by animateDpAsState(targetSize.width, spring(dampingRatio = 0.78f, stiffness = 380f))
     val height by animateDpAsState(targetSize.height, spring(dampingRatio = 0.82f, stiffness = 420f))
     val corner by animateDpAsState(if (expanded) 30.dp else 32.dp, spring(stiffness = 400f))
     val shape = RoundedCornerShape(corner)
+    val islandScale by animateFloatAsState(
+        if (pressed) 0.97f else 1f,
+        spring(dampingRatio = 0.72f, stiffness = 560f),
+        label = "islandPressScale",
+    )
     val glow by animateFloatAsState(if (status == IslandPlaybackStatus.PLAYING) 1f else 0.35f, tween(400))
     val playing = status == IslandPlaybackStatus.PLAYING
     val barPhase = rememberInfiniteTransition(label = "equalizer").animateFloat(
@@ -119,6 +129,10 @@ fun DynamicIsland(onShowMain: () -> Unit, onClose: () -> Unit, onSizeChange: (Dp
             shadowElevation = 8.dp,
             modifier = Modifier
                 .size(width, height)
+                .graphicsLayer {
+                    scaleX = islandScale
+                    scaleY = islandScale
+                }
                 .drawBehind {
                     // liquid glass: album-tinted sheen + moving specular highlight
                     val radius = corner.toPx()
@@ -151,8 +165,10 @@ fun DynamicIsland(onShowMain: () -> Unit, onClose: () -> Unit, onSizeChange: (Dp
                 }
                 .clickable(interactionSource = interaction, indication = null) { pinnedOpen = !pinnedOpen },
         ) {
-            if (expanded) ExpandedIsland(state, statusText, library.liked.any { it.id == song?.id }, guest, settings, downloads.values.toList(), onShowMain, onClose, barPhase.value)
-            else CompactIsland(state, statusText, settings.dynamicIslandLyrics, settings.lyricsProviders, settings.dynamicIslandDownloads, downloads.values.toList(), barPhase.value)
+            Crossfade(targetState = expanded, animationSpec = tween(180), label = "islandContent") { targetExpanded ->
+                if (targetExpanded) ExpandedIsland(state, statusText, library.liked.any { it.id == song?.id }, guest, settings, downloads.values.toList(), onShowMain, onClose, barPhase.value)
+                else CompactIsland(state, statusText, settings.dynamicIslandLyrics, settings.lyricsProviders, settings.dynamicIslandDownloads, downloads.values.toList(), barPhase.value)
+            }
         }
     }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
@@ -227,115 +243,163 @@ private fun ExpandedIsland(
 ) {
     val song = state.current
     val lyricState = rememberIslandLyrics(song, settings.dynamicIslandLyrics, settings.lyricsProviders)
-    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Box(Modifier.size(58.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFF232323)), contentAlignment = Alignment.Center) {
-                if (song != null) Thumb(song.thumbnail, 58.dp) else Icon(Icons.Default.MusicNote, "No artwork", tint = Color(0xFFD8D8D8))
+    Row(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(Modifier.size(58.dp).clip(RoundedCornerShape(12.dp)).background(Color(0x22FFFFFF)), contentAlignment = Alignment.Center) {
+                    if (song != null) Thumb(song.thumbnail, 58.dp) else Icon(Icons.Default.MusicNote, null, tint = Color(0xFFD8D8D8))
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(song?.title ?: "Nothing playing", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        when {
+                            guest -> "${song?.artistText ?: statusText} · Host controls playback"
+                            song == null || state.error != null -> statusText
+                            else -> "${song.artistText} · $statusText"
+                        },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = if (state.error != null) Color(0xFFFFB4AB) else Color(0xFFB8B8B8),
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                }
+                if (state.isPlaying) Equalizer(phase)
             }
-            Column(Modifier.weight(1f)) {
-                Text(song?.title ?: "Nothing playing", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
-                Text(
-                    when {
-                        state.error != null || state.isBuffering || song == null -> statusText
-                        guest -> "${song.artistText} · $statusText · Host controls playback"
-                        else -> "${song.artistText} · $statusText"
-                    },
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    color = if (state.error != null) Color(0xFFFFB4AB) else Color(0xFFB8B8B8),
-                    style = MaterialTheme.typography.bodySmall,
+
+            val duration = state.durationMs.coerceAtLeast(1)
+            var seeking by remember(song?.id) { mutableStateOf(false) }
+            var seekFraction by remember(song?.id) { mutableFloatStateOf(0f) }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(formatTime(if (seeking) (seekFraction * duration).toLong() else state.positionMs), color = Color(0xFFB8B8B8), style = MaterialTheme.typography.labelSmall)
+                Slider(
+                    value = if (seeking) seekFraction else (state.positionMs.toFloat() / duration).coerceIn(0f, 1f),
+                    onValueChange = { seeking = true; seekFraction = it },
+                    onValueChangeFinished = { if (!guest) Player.seekTo((seekFraction * duration).toLong()); seeking = false },
+                    enabled = song != null && state.durationMs > 0 && !guest,
+                    modifier = Modifier.weight(1f),
+                    colors = SliderDefaults.colors(
+                        thumbColor = Color.White,
+                        activeTrackColor = Color.White,
+                        inactiveTrackColor = Color(0x59FFFFFF),
+                        disabledThumbColor = Color(0xFF777777),
+                        disabledActiveTrackColor = Color(0xFF777777),
+                        disabledInactiveTrackColor = Color(0x33FFFFFF),
+                    ),
                 )
+                Text("-" + formatTime((duration - state.positionMs).coerceAtLeast(0)), color = Color(0xFFB8B8B8), style = MaterialTheme.typography.labelSmall)
             }
-            IslandIconButton("Open Utaloom", onShowMain) { Icon(Icons.AutoMirrored.Filled.OpenInNew, null) }
-            IslandIconButton("Hide Dynamic Island", onClose) { Icon(Icons.Default.Close, null) }
+
+            if (settings.dynamicIslandDownloads && downloads.isNotEmpty()) {
+                downloads.take(1).forEach { download ->
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(Icons.Default.Download, null, Modifier.size(14.dp), tint = Color(0xFFB8B8B8))
+                        Text(download.title, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall)
+                        Text(download.boundedProgress?.let { "${(it * 100).toInt()}%" } ?: "Starting", color = Color(0xFFB8B8B8), style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
+
+            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                IslandIconButton(if (liked) "Unlike" else "Like", { song?.let(Library::toggleLike) }, song != null) {
+                    Icon(if (liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder, null)
+                }
+                Spacer(Modifier.weight(1f))
+                IslandIconButton("Previous", Player::previous, song != null && !guest) { Icon(Icons.Default.SkipPrevious, null) }
+                Surface(color = Color(0x26FFFFFF), shape = CircleShape) {
+                    IslandIconButton(if (state.isPlaying) "Pause" else "Play", { Player.playPause() }, song != null && !guest) {
+                        Icon(if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, null)
+                    }
+                }
+                IslandIconButton("Next", { Player.next() }, state.hasNext && !guest) { Icon(Icons.Default.SkipNext, null) }
+                Spacer(Modifier.weight(1f))
+                IslandIconButton("Open Utaloom", onShowMain) { Icon(Icons.AutoMirrored.Filled.OpenInNew, null) }
+                IslandIconButton("Hide Dynamic Island", onClose) { Icon(Icons.Default.Close, null) }
+            }
         }
 
-        if (settings.dynamicIslandLyrics && song != null) {
-            val lyricText = when (lyricState) {
-                IslandLyrics.Loading -> "Loading lyrics"
-                IslandLyrics.Unavailable -> "Synced lyrics unavailable"
-                IslandLyrics.Failed -> "Lyrics unavailable"
-                is IslandLyrics.Ready -> lyricState.lyrics.currentLine(state.positionMs) ?: "Lyrics start soon"
-                IslandLyrics.Hidden -> ""
-            }
-            Text(lyricText, Modifier.fillMaxWidth().semantics { contentDescription = "Lyrics: $lyricText" }, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium, color = if (lyricState is IslandLyrics.Ready) Color.White else Color(0xFFB8B8B8))
-        }
-
-        if (settings.dynamicIslandDownloads && downloads.isNotEmpty()) {
-            downloads.take(2).forEach { download ->
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(Icons.Default.Download, null, Modifier.size(16.dp), tint = Color(0xFFB8B8B8))
-                    Text(download.title, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
-                    Text(download.boundedProgress?.let { "${(it * 100).toInt()}%" } ?: "Starting", color = Color(0xFFB8B8B8), style = MaterialTheme.typography.labelSmall)
+        Box(Modifier.width(268.dp).fillMaxHeight().clip(RoundedCornerShape(20.dp)).background(Color(0x1FFFFFFF)).padding(horizontal = 14.dp, vertical = 10.dp)) {
+            Column(Modifier.fillMaxSize()) {
+                Box(Modifier.weight(1f)) { IslandLyricsPane(lyricState, song, state.positionMs) }
+                if (settings.dynamicIslandQueue) {
+                    val upcoming = state.queue.drop(state.index + 1).take(2)
+                    if (upcoming.isNotEmpty()) {
+                        HorizontalDivider(Modifier.padding(vertical = 6.dp), color = Color(0x22FFFFFF))
+                        Text("Up next", color = Color(0x80FFFFFF), style = MaterialTheme.typography.labelSmall)
+                        upcoming.forEachIndexed { offset, queued ->
+                            QueueRow(queued, enabled = !guest) { Player.selectQueueIndex(state.index + offset + 1) }
+                        }
+                    }
                 }
             }
         }
+    }
+}
 
-        if (settings.dynamicIslandQueue) {
-            state.queue.drop(state.index + 1).take(3).forEachIndexed { offset, queued ->
-                TextButton(
-                    onClick = { Player.selectQueueIndex(state.index + offset + 1) },
-                    enabled = !guest,
-                    modifier = Modifier.fillMaxWidth().height(30.dp).semantics { contentDescription = "Play next: ${queued.title} by ${queued.artistText}" },
-                    contentPadding = PaddingValues(horizontal = 4.dp),
-                ) {
-                    Icon(Icons.Default.QueueMusic, null, Modifier.size(16.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(queued.title, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(queued.artistText, maxLines = 1, overflow = TextOverflow.Ellipsis, color = Color(0xFFB8B8B8), style = MaterialTheme.typography.labelSmall)
+@Composable
+private fun QueueRow(song: Song, enabled: Boolean, onClick: () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) 0.96f else 1f, spring(dampingRatio = 0.7f, stiffness = 620f), label = "queueRowScale")
+    val background by androidx.compose.animation.animateColorAsState(
+        if (hovered) Color(0x1FFFFFFF) else Color.Transparent, tween(140), label = "queueRowBg",
+    )
+    Row(
+        Modifier.fillMaxWidth().height(26.dp)
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .clip(RoundedCornerShape(8.dp)).background(background)
+            .hoverable(interaction)
+            .clickable(interactionSource = interaction, indication = null, enabled = enabled, onClick = onClick)
+            .semantics { contentDescription = "Play next: ${song.title} by ${song.artistText}" },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Icon(Icons.Default.QueueMusic, null, Modifier.size(12.dp), tint = Color(0x99FFFFFF))
+        Text(song.title, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall, color = Color(0xE6FFFFFF))
+        Text(song.artistText, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall, color = Color(0x80FFFFFF))
+    }
+}
+
+@Composable
+private fun IslandLyricsPane(lyricState: IslandLyrics, song: Song?, positionMs: Long) {
+    val lyrics = (lyricState as? IslandLyrics.Ready)?.lyrics
+    val index = lyrics?.let { currentLineIndex(it.lines, positionMs, it.synced) } ?: -1
+    val scrollIndex by animateFloatAsState(
+        if (index < 0) 0f else index.toFloat(),
+        spring(dampingRatio = 0.86f, stiffness = 420f),
+        label = "lyricsScroll",
+    )
+    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center) {
+        when {
+            song == null -> Text("Play something to see lyrics", color = Color(0xFFB8B8B8), style = MaterialTheme.typography.bodySmall)
+            lyricState is IslandLyrics.Loading -> Text("Loading lyrics", color = Color(0xFFB8B8B8), style = MaterialTheme.typography.bodyMedium)
+            lyricState is IslandLyrics.Unavailable -> Text("No synced lyrics for this track", color = Color(0xFFB8B8B8), style = MaterialTheme.typography.bodyMedium)
+            lyricState is IslandLyrics.Failed -> Text("Lyrics unavailable", color = Color(0xFFB8B8B8), style = MaterialTheme.typography.bodyMedium)
+            lyricState is IslandLyrics.Hidden -> Text("Lyrics hidden in settings", color = Color(0xFFB8B8B8), style = MaterialTheme.typography.bodyMedium)
+            lyrics != null -> {
+                val lines = lyrics.lines.filter { !it.background }
+                val centerIdx = if (index >= 0) index else 0
+                val visible = neighboringLines(lines, centerIdx, radius = 1)
+                val basePad = 8
+                Box(Modifier.fillMaxWidth().graphicsLayer { translationY = -((scrollIndex - centerIdx).coerceIn(-1f, 1f) * 6) }) {
+                    Column {
+                        visible.forEach { (origIndex, line) ->
+                            val isCurrent = origIndex == maxOf(0, index)
+                            val currentEnd = lines.getOrNull(origIndex + 1)?.timeMs ?: (line.timeMs + 4_000)
+                            val progress = ((positionMs - line.timeMs).toFloat() / (currentEnd - line.timeMs).coerceAtLeast(1)).coerceIn(0f, 1f)
+                            val alpha = if (isCurrent) karaokeGlow(progress) else 0.45f
+                            Text(
+                                line.text,
+                                color = Color.White.copy(alpha = alpha),
+                                style = if (isCurrent) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodySmall,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(vertical = 3.dp).semantics { contentDescription = "Lyric: ${line.text}" },
+                            )
+                        }
+                    }
                 }
             }
-        }
-
-        val duration = state.durationMs.coerceAtLeast(1)
-        var seeking by remember(song?.id) { mutableStateOf(false) }
-        var seekFraction by remember(song?.id) { mutableFloatStateOf(0f) }
-        Slider(
-
-            thumb = {
-                Box(
-                    Modifier
-                        .size(14.dp)
-                        .shadow(4.dp, CircleShape)
-                        .clip(CircleShape)
-                        .background(Brush.radialGradient(listOf(Color.White, Color(0xCCFFFFFF)))),
-                    contentAlignment = Alignment.Center,
-                ) {}
-            },
-            value = if (seeking) seekFraction else (state.positionMs.toFloat() / duration).coerceIn(0f, 1f),
-            onValueChange = { seeking = true; seekFraction = it },
-            onValueChangeFinished = { if (!guest) Player.seekTo((seekFraction * duration).toLong()); seeking = false },
-            enabled = song != null && state.durationMs > 0 && !guest,
-            colors = SliderDefaults.colors(
-                thumbColor = Color.White,
-                activeTrackColor = Color.White,
-                inactiveTrackColor = Color(0xFF555555),
-                disabledThumbColor = Color(0xFF777777),
-                disabledActiveTrackColor = Color(0xFF777777),
-                disabledInactiveTrackColor = Color(0xFF3A3A3A),
-            ),
-            modifier = Modifier.fillMaxWidth().height(22.dp).semantics { contentDescription = "Playback position" },
-        )
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(formatTime(if (seeking) (seekFraction * duration).toLong() else state.positionMs), color = Color(0xFFB8B8B8), style = MaterialTheme.typography.labelSmall)
-            Text(formatTime(state.durationMs), color = Color(0xFFB8B8B8), style = MaterialTheme.typography.labelSmall)
-        }
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceEvenly) {
-            IslandIconButton(if (liked) "Unlike" else "Like", { song?.let(Library::toggleLike) }, song != null) {
-                Icon(if (liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder, null, tint = if (liked) Color(0xFFFF6B81) else Color.White)
-            }
-            IslandIconButton("Previous", Player::previous, song != null && !guest) { Icon(Icons.Default.SkipPrevious, null) }
-            FilledIconButton(
-                onClick = Player::playPause,
-                enabled = song != null && !guest,
-                colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color.White, contentColor = Color.Black),
-                modifier = Modifier.size(44.dp).semantics { contentDescription = if (state.isPlaying) "Pause" else "Play" },
-            ) {
-                if (state.isBuffering) CircularProgressIndicator(Modifier.size(20.dp), color = Color.Black, strokeWidth = 2.dp)
-                else Icon(if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, null)
-            }
-            IslandIconButton("Next", { Player.next() }, state.hasNext && !guest) { Icon(Icons.Default.SkipNext, null) }
-            IslandIconButton("Open main window", onShowMain) { Icon(Icons.AutoMirrored.Filled.OpenInNew, null) }
         }
     }
 }
@@ -389,5 +453,24 @@ private fun Equalizer(phase: Float) {
 
 @Composable
 private fun IslandIconButton(description: String, onClick: () -> Unit, enabled: Boolean = true, content: @Composable () -> Unit) {
-    IconButton(onClick, enabled = enabled, modifier = Modifier.size(36.dp).semantics { contentDescription = description }, content = content)
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        if (pressed) 0.9f else 1f,
+        spring(dampingRatio = 0.68f, stiffness = 700f),
+        label = "iconPressScale",
+    )
+    IconButton(
+        onClick,
+        enabled = enabled,
+        interactionSource = interaction,
+        modifier = Modifier
+            .size(36.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .semantics { contentDescription = description },
+        content = content,
+    )
 }
