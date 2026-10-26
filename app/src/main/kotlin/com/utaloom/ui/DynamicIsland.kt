@@ -1,7 +1,14 @@
 package com.utaloom.ui
 
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -21,6 +28,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -58,6 +71,9 @@ internal fun islandPlaybackStatus(state: PlayerState): IslandPlaybackStatus = wh
 
 internal fun islandSize(expanded: Boolean) = if (expanded) DpSize(420.dp, 340.dp) else DpSize(304.dp, 64.dp)
 
+/** @param phase 0..1 looping phase; offsets the fake-refraction wobble. */
+internal fun glassHighlight(phase: Float) = Offset(phase, phase * 0.6f - 0.3f)
+
 @Composable
 @OptIn(ExperimentalComposeUiApi::class)
 fun DynamicIsland(onShowMain: () -> Unit, onClose: () -> Unit, onSizeChange: (DpSize) -> Unit = {}) {
@@ -75,8 +91,15 @@ fun DynamicIsland(onShowMain: () -> Unit, onClose: () -> Unit, onSizeChange: (Dp
     val hovered by interaction.collectIsHoveredAsState()
     val expanded = pinnedOpen || hovered
     val targetSize = islandSize(expanded)
-    val width by animateDpAsState(targetSize.width, tween(220))
-    val height by animateDpAsState(targetSize.height, tween(220))
+    val width by animateDpAsState(targetSize.width, spring(dampingRatio = 0.78f, stiffness = 380f))
+    val height by animateDpAsState(targetSize.height, spring(dampingRatio = 0.82f, stiffness = 420f))
+    val corner by animateDpAsState(if (expanded) 30.dp else 32.dp, spring(stiffness = 400f))
+    val shape = RoundedCornerShape(corner)
+    val glow by animateFloatAsState(if (status == IslandPlaybackStatus.PLAYING) 1f else 0.35f, tween(400))
+    val playing = status == IslandPlaybackStatus.PLAYING
+    val barPhase = rememberInfiniteTransition(label = "equalizer").animateFloat(
+        0f, 1f, infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "barPhase",
+    )
     LaunchedEffect(width, height) { onSizeChange(DpSize(width, height)) }
     val statusText = when (status) {
         IslandPlaybackStatus.EMPTY -> "Nothing playing"
@@ -89,18 +112,34 @@ fun DynamicIsland(onShowMain: () -> Unit, onClose: () -> Unit, onSizeChange: (Dp
 
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         Surface(
-            color = Color(0xFF050505),
+            color = Color(0xF2050505),
             contentColor = Color.White,
-            shape = RoundedCornerShape(if (expanded) 30.dp else 32.dp),
+            shape = shape,
             tonalElevation = 0.dp,
             shadowElevation = 8.dp,
             modifier = Modifier
                 .size(width, height)
+                .drawBehind {
+                    // liquid glass: album-tinted sheen + moving specular highlight
+                    val radius = corner.toPx()
+                    drawRoundRect(brush = Brush.linearGradient(listOf(Color(0x33FFFFFF), Color(0x08FFFFFF), Color(0x24FFFFFF))), cornerRadius = CornerRadius(radius))
+                    drawRoundRect(
+                        brush = Brush.radialGradient(listOf(Color(0x2EFFFFFF), Color(0x00FFFFFF)), center = Offset(size.width * (0.25f + 0.25f * barPhase.value), size.height * 0.08f), radius = size.width * 0.65f),
+                        cornerRadius = CornerRadius(radius),
+                    )
+                }
                 .hoverable(interaction)
-                .border(2.dp, if (focused) Color.White else Color.Transparent, RoundedCornerShape(if (expanded) 30.dp else 32.dp))
+                .border(1.5.dp, Brush.linearGradient(listOf(Color(0x59FFFFFF), Color(0x14FFFFFF), Color(0x4DFFFFFF))), shape)
+                .drawWithContent {
+                    drawContent()
+                    // soft outer glow when playing
+                    val radius = corner.toPx()
+                    drawRoundRect(brush = Brush.linearGradient(listOf(Color(0x1EFFFFFF), Color(0x05FFFFFF))), cornerRadius = CornerRadius(radius), alpha = glow * 0.5f)
+                }
                 .semantics { contentDescription = "Dynamic Island. $description"; role = Role.Button }
                 .focusRequester(focusRequester)
                 .onFocusChanged { focused = it.isFocused }
+                .border(if (focused) 1.dp else 0.dp, Color(0xB3FFFFFF), shape)
                 .focusable()
                 .onKeyEvent { event ->
                     if (event.type != KeyEventType.KeyDown) false else when (event.key) {
@@ -112,8 +151,8 @@ fun DynamicIsland(onShowMain: () -> Unit, onClose: () -> Unit, onSizeChange: (Dp
                 }
                 .clickable(interactionSource = interaction, indication = null) { pinnedOpen = !pinnedOpen },
         ) {
-            if (expanded) ExpandedIsland(state, statusText, library.liked.any { it.id == song?.id }, guest, settings, downloads.values.toList(), onShowMain, onClose)
-            else CompactIsland(state, statusText, settings.dynamicIslandLyrics, settings.lyricsProviders, settings.dynamicIslandDownloads, downloads.values.toList())
+            if (expanded) ExpandedIsland(state, statusText, library.liked.any { it.id == song?.id }, guest, settings, downloads.values.toList(), onShowMain, onClose, barPhase.value)
+            else CompactIsland(state, statusText, settings.dynamicIslandLyrics, settings.lyricsProviders, settings.dynamicIslandDownloads, downloads.values.toList(), barPhase.value)
         }
     }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
@@ -127,6 +166,7 @@ private fun CompactIsland(
     lyricsProviders: List<String>,
     showDownloads: Boolean,
     downloads: List<com.utaloom.playback.ActiveDownload>,
+    phase: Float,
 ) {
     val song = state.current
     val lyricState = rememberIslandLyrics(song, showLyrics, lyricsProviders)
@@ -163,6 +203,7 @@ private fun CompactIsland(
                 trackColor = Color(0xFF555555),
                 strokeWidth = 2.dp,
             )
+            state.isPlaying -> Equalizer(phase)
             state.error != null -> Icon(Icons.Default.ErrorOutline, null, tint = Color(0xFFFFB4AB))
             state.isBuffering -> CircularProgressIndicator(Modifier.size(22.dp), color = Color.White, strokeWidth = 2.dp)
             state.current != null -> Icon(if (state.isPlaying) Icons.Default.GraphicEq else Icons.Default.PlayArrow, null, tint = Color.White)
@@ -172,6 +213,7 @@ private fun CompactIsland(
 }
 
 @Composable
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 private fun ExpandedIsland(
     state: PlayerState,
     statusText: String,
@@ -181,6 +223,7 @@ private fun ExpandedIsland(
     downloads: List<com.utaloom.playback.ActiveDownload>,
     onShowMain: () -> Unit,
     onClose: () -> Unit,
+    phase: Float,
 ) {
     val song = state.current
     val lyricState = rememberIslandLyrics(song, settings.dynamicIslandLyrics, settings.lyricsProviders)
@@ -248,6 +291,17 @@ private fun ExpandedIsland(
         var seeking by remember(song?.id) { mutableStateOf(false) }
         var seekFraction by remember(song?.id) { mutableFloatStateOf(0f) }
         Slider(
+
+            thumb = {
+                Box(
+                    Modifier
+                        .size(14.dp)
+                        .shadow(4.dp, CircleShape)
+                        .clip(CircleShape)
+                        .background(Brush.radialGradient(listOf(Color.White, Color(0xCCFFFFFF)))),
+                    contentAlignment = Alignment.Center,
+                ) {}
+            },
             value = if (seeking) seekFraction else (state.positionMs.toFloat() / duration).coerceIn(0f, 1f),
             onValueChange = { seeking = true; seekFraction = it },
             onValueChangeFinished = { if (!guest) Player.seekTo((seekFraction * duration).toLong()); seeking = false },
@@ -317,6 +371,20 @@ private fun rememberIslandLyrics(song: Song?, enabled: Boolean, providers: List<
         }
     }
     return result
+}
+
+
+@Composable
+private fun Equalizer(phase: Float) {
+    Canvas(Modifier.size(22.dp).semantics { contentDescription = "Playing" }) {
+        val barW = size.width / 7f
+        val values = floatArrayOf(0.35f, 0.8f, 0.5f, 1f, 0.6f, 0.85f, 0.3f)
+        values.forEachIndexed { idx, base ->
+            val h = size.height * (0.25f + 0.75f * ((phase + idx * 0.13f) % 1f))
+            drawRoundRect(Color.White, topLeft = Offset(idx * barW, size.height - h), size = androidx.compose.ui.geometry.Size(barW * 0.6f, h), cornerRadius = CornerRadius(barW / 2f))
+        }
+        // ponytail: phase-driven bars, not audio-reactive; add FFT tap when Player exposes samples.
+    }
 }
 
 @Composable

@@ -26,6 +26,16 @@ import java.awt.Point
 import java.awt.Rectangle
 
 class DynamicIslandTest {
+    @Test
+    fun glassHighlightStaysInsideNormalizedBounds() {
+        val center = glassHighlight(0f)
+        val edge = glassHighlight(1f)
+        assertTrue(center.x >= 0f)
+        assertTrue(center.y >= -0.3f)
+        assertTrue(edge.x <= 1.1f)
+        assertTrue(edge.y <= 0.3f)
+    }
+
     private val song = Song("track", "Track", listOf("Artist"))
 
     @Test
