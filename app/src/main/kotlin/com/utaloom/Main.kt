@@ -64,7 +64,7 @@ internal fun runApp(exitProcessOnExit: Boolean) {
             if (!isLinux) {
                 // Same as 1.2.0, which users found stable on Windows: let Compose drive the placement.
                 fullscreen = enabled
-                if (enabled && windowState.placement != WindowPlacement.Fullscreen) previousPlacement = windowState.placement
+                if (enabled && windowState.placement != WindowPlacement.Fullscreen && awtWindow?.placement != WindowPlacement.Fullscreen) previousPlacement = windowState.placement
                 windowState.placement = if (enabled) WindowPlacement.Fullscreen else previousPlacement
                 return
             }
@@ -228,13 +228,14 @@ internal fun runApp(exitProcessOnExit: Boolean) {
                         stable = 0
                         // Compose's own setter leaves exclusive mode once; clearing the device too crashes AWT
                         // (realFSWindow null), so never touch fullScreenWindow directly here.
-                        if (window.placement != want) {
-                            // ponytail: Compose 1.12.1 cannot restore Maximized directly from native Fullscreen.
-                            if (want == WindowPlacement.Maximized && window.placement == WindowPlacement.Fullscreen) {
-                                window.placement = WindowPlacement.Floating
-                            }
-                            window.placement = want
+                        // ponytail: Compose 1.12.1 cannot leave native Fullscreen straight for any other placement.
+                        // Passing through Floating is what actually exits exclusive mode on Windows; setting the
+                        // target placement directly leaves the native window fullscreen while the state already reads
+                        // the new placement, so nothing recomposes and the window never comes back.
+                        if (want != WindowPlacement.Fullscreen && window.placement == WindowPlacement.Fullscreen) {
+                            window.placement = WindowPlacement.Floating
                         }
+                        if (window.placement != want) window.placement = want
                         windowState.placement = want
                     }
                     kotlinx.coroutines.delay(50)
