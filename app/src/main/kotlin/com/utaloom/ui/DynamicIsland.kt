@@ -38,8 +38,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.*
@@ -90,7 +88,6 @@ fun DynamicIsland(onShowMain: () -> Unit, onClose: () -> Unit, onExpandedChange:
     val guest = Player.remoteControlled
     var pinnedOpen by remember { mutableStateOf(false) }
     var focused by remember { mutableStateOf(false) }
-    val focusRequester = remember { FocusRequester() }
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
     val pressed by interaction.collectIsPressedAsState()
@@ -110,7 +107,8 @@ fun DynamicIsland(onShowMain: () -> Unit, onClose: () -> Unit, onExpandedChange:
     val barPhase = rememberInfiniteTransition(label = "equalizer").animateFloat(
         0f, 1f, infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "barPhase",
     )
-    LaunchedEffect(expanded) { onExpandedChange(expanded) }
+    val expandedChange by rememberUpdatedState(onExpandedChange)
+    LaunchedEffect(expanded) { expandedChange(expanded) }
     val statusText = when (status) {
         IslandPlaybackStatus.EMPTY -> "Nothing playing"
         IslandPlaybackStatus.BUFFERING -> "Buffering"
@@ -151,7 +149,6 @@ fun DynamicIsland(onShowMain: () -> Unit, onClose: () -> Unit, onExpandedChange:
                     drawRoundRect(brush = Brush.linearGradient(listOf(Color(0x1EFFFFFF), Color(0x05FFFFFF))), cornerRadius = CornerRadius(radius), alpha = glow * 0.5f)
                 }
                 .semantics { contentDescription = "Dynamic Island. $description"; role = Role.Button }
-                .focusRequester(focusRequester)
                 .onFocusChanged { focused = it.isFocused }
                 .border(if (focused) 1.dp else 0.dp, Color(0xB3FFFFFF), shape)
                 .focusable()
@@ -171,8 +168,6 @@ fun DynamicIsland(onShowMain: () -> Unit, onClose: () -> Unit, onExpandedChange:
             }
         }
     }
-    // Overlay must never steal keyboard focus from the app or other windows; focus arrives on hover/click.
-    LaunchedEffect(hovered, pinnedOpen) { if (hovered || pinnedOpen) runCatching { focusRequester.requestFocus() } }
 }
 
 @Composable

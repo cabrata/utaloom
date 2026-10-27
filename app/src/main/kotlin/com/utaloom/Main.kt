@@ -264,10 +264,11 @@ internal fun runApp(exitProcessOnExit: Boolean) {
             resizable = false,
             alwaysOnTop = settings.dynamicIslandAlwaysOnTop,
         ) {
-            LaunchedEffect(window) {
+            DisposableEffect(window) {
                 if (window.background != java.awt.Color(0, 0, 0, 0)) {
                     window.background = java.awt.Color(0, 0, 0, 0)
                 }
+                onDispose { islandState.size = com.utaloom.ui.islandSize(false) }
             }
             LaunchedEffect(window, islandState.size, settings.dynamicIslandMonitor, settings.dynamicIslandTopOffset) {
                 javax.swing.SwingUtilities.invokeLater {
