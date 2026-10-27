@@ -228,20 +228,19 @@ internal fun runApp(exitProcessOnExit: Boolean) {
                         stable = 0
                         // Compose's own setter leaves exclusive mode once; clearing the device too crashes AWT
                         // (realFSWindow null), so never touch fullScreenWindow directly here.
-                        if (window.placement != want) window.placement = want
+                        if (window.placement != want) {
+                            // ponytail: Compose 1.12.1 cannot restore Maximized directly from native Fullscreen.
+                            if (want == WindowPlacement.Maximized && window.placement == WindowPlacement.Fullscreen) {
+                                window.placement = WindowPlacement.Floating
+                            }
+                            window.placement = want
+                        }
                         windowState.placement = want
                     }
                     kotlinx.coroutines.delay(50)
                 }
             }
-            SideEffect {
-                awtWindow = window
-                // ponytail: Compose 1.12.1 doesn't clear fullscreen on maximize; remove when its native transition is fixed.
-                if (windowState.placement == WindowPlacement.Maximized && window.placement == WindowPlacement.Fullscreen) {
-                    window.placement = WindowPlacement.Floating
-                    window.placement = WindowPlacement.Maximized
-                }
-            }
+            SideEffect { awtWindow = window }
             UtaloomApp(vlcError, fullscreen, ::setFullscreen)
         }
         if (miniVisible) Window(
