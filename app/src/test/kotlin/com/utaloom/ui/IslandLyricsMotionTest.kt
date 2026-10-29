@@ -1,5 +1,6 @@
 package com.utaloom.ui
 
+import androidx.compose.ui.graphics.Color
 import com.utaloom.shared.LyricLine
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -86,5 +87,21 @@ class IslandLyricsMotionTest {
         assertEquals(0f, seekFraction(-1_000, 100_000))
         assertEquals(0f, seekFraction(1_000, 0))
         assertEquals(0f, seekFraction(1_000, -100))
+    }
+
+    @Test
+    fun islandAccentContrastAndFallback() {
+        assertEquals(DefaultSeed, islandAccentForSeed(null))
+        assertEquals(DefaultSeed, islandAccentForSeed(Color.Transparent))
+
+        // Near-black dark seed gets lifted to readable brightness on Obsidian (#08080A).
+        val lifted = islandAccentForSeed(Color(0.08f, 0.02f, 0.02f))
+        val liftedHsv = rgbToHsv(lifted.red, lifted.green, lifted.blue)
+        assertTrue(liftedHsv[1] >= 0.44f)
+        assertTrue(liftedHsv[2] >= 0.67f)
+
+        // Greyscale art falls back to soft neutral light instead of oversaturating noise.
+        val neutral = islandAccentForSeed(Color(0.25f, 0.25f, 0.25f))
+        assertEquals(Color(0xFFE5E5EA), neutral)
     }
 }

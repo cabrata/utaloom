@@ -1,5 +1,6 @@
 package com.utaloom.ui
 
+import androidx.compose.ui.graphics.Color
 import com.utaloom.shared.LyricLine
 
 // ponytail: 300ms lookahead mirrors Shared.currentIndex so both stay in sync; unify when the island renders line lists directly.
@@ -42,4 +43,16 @@ internal fun karaokeGlow(progress: Float): Float = GLOW_FULL_ALPHA - GLOW_DIM_AL
 internal fun seekFraction(positionMs: Long, durationMs: Long): Float {
     if (durationMs <= 0) return 0f
     return (positionMs.toFloat() / durationMs).coerceIn(0f, 1f)
+}
+
+/**
+ * Ensures [seed] has readable saturation and brightness against the dark Obsidian
+ * Dynamic Island surface, matching the Windhawk Dynamic Island contrast floor.
+ */
+internal fun islandAccentForSeed(seed: Color?): Color {
+    if (seed == null || seed.alpha < 0.05f) return DefaultSeed
+    val hsv = rgbToHsv(seed.red, seed.green, seed.blue)
+    val sat = if (hsv[1] < 0.08f) 0f else hsv[1].coerceIn(0.45f, 0.92f)
+    val bri = hsv[2].coerceIn(0.68f, 0.98f)
+    return if (sat == 0f) Color(0xFFE5E5EA) else Color.hsv(hsv[0], sat, bri)
 }
