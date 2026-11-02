@@ -76,6 +76,7 @@ data class Settings(
     val accountEmail: String? = null,
     val accountAvatar: String? = null,
     val useLoginForBrowse: Boolean = true,
+    val spotifySpDc: String? = null,
     val contentLanguage: String = "en",
     val contentCountry: String = "US",
     val hideExplicit: Boolean = false,

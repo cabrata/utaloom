@@ -14,7 +14,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
+import com.utaloom.canvas.extractSpDc
 import com.utaloom.data.Stores
+import com.utaloom.platform.WebLogin
 import com.utaloom.playback.Player
 import com.utaloom.shared.cookieError
 import com.utaloom.innertube.YouTube
@@ -120,6 +122,9 @@ fun SettingsScreen(isMobile: Boolean = System.getProperty("java.vm.name") == "Da
     val lib by Stores.library.state.collectAsState()
     var login by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf<String?>(null) }
+    var webError by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    fun webLogin(run: suspend () -> Unit) { webError = null; scope.launch { try { run() } catch (e: CancellationException) { throw e } catch (e: Throwable) { webError = "Browser login failed: ${e.message ?: e.javaClass.simpleName}" } } }
     VScrollColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         item { SectionTitle("Settings") }
         item {
@@ -134,7 +139,13 @@ fun SettingsScreen(isMobile: Boolean = System.getProperty("java.vm.name") == "Da
             }
             @Composable
             fun AccountActions() {
-                OutlinedButton({ login = true }) { Text(if (s.cookie == null) "Sign in" else "Update login") }
+                if (!isMobile) Button({ webLogin {
+                    val cookie = WebLogin.run("Sign in to YouTube Music", "https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2Fmusic.youtube.com") { jar ->
+                        jar.entries.joinToString("; ") { "${it.key}=${it.value}" }.takeIf { loginCookieError(it) == null }
+                    }
+                    if (cookie != null) signInWithCookie(cookie)
+                } }) { Text("Sign in with browser") }
+                OutlinedButton({ login = true }) { Text(if (s.cookie == null) "Paste cookie" else "Update login") }
                 if (s.cookie != null) TextButton({ confirm = "signout" }) { Text("Sign out") }
             }
             BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp)) {
@@ -235,6 +246,18 @@ fun SettingsScreen(isMobile: Boolean = System.getProperty("java.vm.name") == "Da
             FlowRow(Modifier.padding(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton({ confirm = "history" }, enabled = lib.history.isNotEmpty() || lib.playCounts.isNotEmpty()) { Text("Clear listening history") }
                 TextButton({ confirm = "search" }, enabled = lib.searchHistory.isNotEmpty()) { Text("Clear search history") }
+            }
+        }
+        item { webError?.let { Text(it, Modifier.padding(horizontal = 24.dp), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) } }
+        item {
+            SectionTitle("Spotify (Canvas)")
+            Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text(if (s.spotifySpDc == null) "Not signed in. Sign in to look up Spotify Canvas loops." else "Signed in to Spotify.", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (!isMobile) Button({ webLogin {
+                    val spDc = WebLogin.run("Sign in to Spotify", "https://accounts.spotify.com/login?continue=https%3A%2F%2Fopen.spotify.com%2F") { jar -> jar["sp_dc"]?.let { extractSpDc("sp_dc=$it") } }
+                    if (spDc != null) Stores.settings.update { it.copy(spotifySpDc = spDc) }
+                } }) { Text(if (s.spotifySpDc == null) "Sign in" else "Sign in again") }
+                if (s.spotifySpDc != null) TextButton({ Stores.settings.update { it.copy(spotifySpDc = null) } }) { Text("Sign out") }
             }
         }
         item { ContentLocaleFields(s.contentLanguage, s.contentCountry) }
