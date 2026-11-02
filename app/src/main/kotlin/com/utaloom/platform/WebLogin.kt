@@ -16,6 +16,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import me.friwi.jcefmaven.CefAppBuilder
 import org.cef.CefApp
+import org.cef.CefSettings
 import org.cef.callback.CefCookieVisitor
 import org.cef.network.CefCookie
 import org.cef.network.CefCookieManager
@@ -30,8 +31,14 @@ object WebLogin {
     // The Chromium runtime (~100 MB) is fetched on first use, so it never bloats the installer.
     private val app: CefApp by lazy {
         CefAppBuilder().apply {
-            setInstallDir(Paths.dir.resolve("jcef"))
+            val dir = Paths.dir.resolve("jcef")
+            setInstallDir(dir)
             // No cache_path: every login starts from a clean, in-memory session.
+            // Own root dir so CEF never shares or locks the default %LOCALAPPDATA%\CEF profile of other CEF apps.
+            cefSettings.root_cache_path = dir.resolve("root").absolutePath
+            // Packaged builds have no console, so keep Chromium's errors in a file users can send.
+            cefSettings.log_file = dir.resolve("debug.log").absolutePath
+            cefSettings.log_severity = CefSettings.LogSeverity.LOGSEVERITY_WARNING
             cefSettings.windowless_rendering_enabled = false
             setProgressHandler { state, percent ->
                 status.value = "Preparing browser: ${state.name.lowercase().replace('_', ' ')}" + if (percent >= 0) " ${percent.toInt()}%" else ""
@@ -52,12 +59,12 @@ object WebLogin {
     }
 
     /** Opens [url] in a browser window until [accept] returns a result from the cookies, or the user closes it. */
-    suspend fun <T : Any> run(title: String, url: String, accept: (CookieJar) -> T?): T? {
-        val cef = try { withContext(Dispatchers.IO) { app } } finally { status.value = null }
-        return suspendCancellableCoroutine { cont ->
+    suspend fun <T : Any> run(title: String, url: String, accept: (CookieJar) -> T?): T? = try {
+        // createClient runs CefInitialize on first use; off the EDT a slow or stuck start can't freeze the app.
+        val client = withContext(Dispatchers.IO) { app.also { status.value = "Starting browser…" }.createClient() }
+        suspendCancellableCoroutine { cont ->
             SwingUtilities.invokeLater {
               try {
-                val client = cef.createClient()
                 val browser = client.createBrowser(url, false, false)
                 val frame = JFrame(title)
                 var timer: Timer? = null
@@ -78,14 +85,18 @@ object WebLogin {
                 frame.pack()
                 frame.setLocationRelativeTo(null)
                 frame.isVisible = true
+                // Windows may open a window started from a background task behind the main window.
+                frame.toFront()
+                status.value = null
                 timer = Timer(1500) {
                     Thread { accept(readCookies())?.let { r -> SwingUtilities.invokeLater { finish(r) } } }.start()
                 }.also { it.start() }
                 cont.invokeOnCancellation { SwingUtilities.invokeLater { finish(null) } }
               } catch (e: Throwable) {
+                client.dispose()
                 if (cont.isActive) cont.resumeWithException(e)
               }
             }
         }
-    }
+    } finally { status.value = null }
 }
