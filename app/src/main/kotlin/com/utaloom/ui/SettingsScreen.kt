@@ -124,6 +124,7 @@ fun SettingsScreen(isMobile: Boolean = System.getProperty("java.vm.name") == "Da
     var confirm by remember { mutableStateOf<String?>(null) }
     var webError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    val webStatus by WebLogin.status.collectAsState()
     fun webLogin(run: suspend () -> Unit) { webError = null; scope.launch { try { run() } catch (e: CancellationException) { throw e } catch (e: Throwable) { webError = "Browser login failed: ${e.message ?: e.javaClass.simpleName}" } } }
     VScrollColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         item { SectionTitle("Settings") }
@@ -248,7 +249,7 @@ fun SettingsScreen(isMobile: Boolean = System.getProperty("java.vm.name") == "Da
                 TextButton({ confirm = "search" }, enabled = lib.searchHistory.isNotEmpty()) { Text("Clear search history") }
             }
         }
-        item { webError?.let { Text(it, Modifier.padding(horizontal = 24.dp), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) } }
+        item { (webStatus ?: webError)?.let { Text(it, Modifier.padding(horizontal = 24.dp), color = if (webStatus != null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) } }
         item {
             SectionTitle("Spotify (Canvas)")
             Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {

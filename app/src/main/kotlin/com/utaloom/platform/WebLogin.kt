@@ -9,6 +9,8 @@ import javax.swing.JFrame
 import javax.swing.SwingUtilities
 import javax.swing.Timer
 import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -22,12 +24,18 @@ import org.cef.network.CefCookieManager
 typealias CookieJar = Map<String, String>
 
 object WebLogin {
+    /** Human-readable setup progress (first-run download, startup), null when idle. */
+    val status = MutableStateFlow<String?>(null)
+
     // The Chromium runtime (~100 MB) is fetched on first use, so it never bloats the installer.
     private val app: CefApp by lazy {
         CefAppBuilder().apply {
             setInstallDir(Paths.dir.resolve("jcef"))
             // No cache_path: every login starts from a clean, in-memory session.
             cefSettings.windowless_rendering_enabled = false
+            setProgressHandler { state, percent ->
+                status.value = "Preparing browser: ${state.name.lowercase().replace('_', ' ')}" + if (percent >= 0) " ${percent.toInt()}%" else ""
+            }
         }.build()
     }
 
@@ -45,9 +53,10 @@ object WebLogin {
 
     /** Opens [url] in a browser window until [accept] returns a result from the cookies, or the user closes it. */
     suspend fun <T : Any> run(title: String, url: String, accept: (CookieJar) -> T?): T? {
-        val cef = withContext(Dispatchers.IO) { app }
+        val cef = try { withContext(Dispatchers.IO) { app } } finally { status.value = null }
         return suspendCancellableCoroutine { cont ->
             SwingUtilities.invokeLater {
+              try {
                 val client = cef.createClient()
                 val browser = client.createBrowser(url, false, false)
                 val frame = JFrame(title)
@@ -73,6 +82,9 @@ object WebLogin {
                     Thread { accept(readCookies())?.let { r -> SwingUtilities.invokeLater { finish(r) } } }.start()
                 }.also { it.start() }
                 cont.invokeOnCancellation { SwingUtilities.invokeLater { finish(null) } }
+              } catch (e: Throwable) {
+                if (cont.isActive) cont.resumeWithException(e)
+              }
             }
         }
     }
