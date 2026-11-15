@@ -83,9 +83,11 @@ class CanvasVideoTest {
             val video = directory.resolve("loop.mp4")
             if (!video.isFile) {
                 val log = directory.resolve("ffmpeg.log")
-                val process = ProcessBuilder("ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i",
-                    "testsrc2=size=180x320:rate=15", "-t", "1", "-c:v", "libx264", "-pix_fmt", "yuv420p", video.absolutePath)
-                    .redirectErrorStream(true).redirectOutput(log).start()
+                val process = runCatching {
+                    ProcessBuilder("ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i",
+                        "testsrc2=size=180x320:rate=15", "-t", "1", "-c:v", "libx264", "-pix_fmt", "yuv420p", video.absolutePath)
+                        .redirectErrorStream(true).redirectOutput(log).start()
+                }.onFailure { assumeTrue("ffmpeg required for the video fixture", false) }.getOrThrow()
                 check(process.waitFor(15, TimeUnit.SECONDS) && process.exitValue() == 0) { "Video fixture failed: ${log.readText()}" }
             }
             return video
