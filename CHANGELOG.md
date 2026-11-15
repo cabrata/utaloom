@@ -1,5 +1,27 @@
 # Changelog
 
+## [v1.5.0] - 2026-11-15
+
+### Added
+- **desktop:** Bundle Chromium for browser login; hide sign-in after login (`b3a5dfd`)
+- **playback:** Add BitChord-compatible music source add-ons (`8f24249`)
+- **desktop:** Add YouTube and Spotify browser login via JCEF; port Spotify Canvas client (`1d152b3`)
+- **desktop:** Add iOS-style Dynamic Island motion and Windhawk material (`3ae458c`)
+- **desktop:** Add split glass island with animated lyrics and press feedback (`3698a5f`)
+- **desktop:** Add liquid glass island surface (`27202a0`)
+- **desktop:** Expand Dynamic Island features (`bcbdd96`)
+- **desktop:** Add Dynamic Island overlay (`77c9cb9`)
+
+### Fixed
+- **desktop:** Read httpOnly cookies; skip Chromium first-run dialog (`27ac06e`)
+- **desktop:** Start JCEF off EDT; log Chromium errors for Windows browser login (`f876f36`)
+- **desktop:** Show browser login setup progress; surface JCEF errors (`a1a7879`)
+- **desktop:** Restore native window via Floating before re-maximizing on Windows (`4d939fc`)
+- **desktop:** Correct liquid glass island behavior (`5a57539`)
+- **desktop:** Restore maximized placement after rapid fullscreen toggles (`e105edb`)
+- **desktop:** Eliminate Dynamic Island redraw reentry on Windows (`c5a5849`)
+- **desktop:** Preserve placement across rapid fullscreen toggles on Windows (`ebda7af`)
+
 ## [v1.4.0] - 2026-10-11
 
 ### Added
