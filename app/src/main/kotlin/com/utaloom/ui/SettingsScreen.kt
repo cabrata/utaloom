@@ -218,6 +218,7 @@ fun SettingsScreen(isMobile: Boolean = System.getProperty("java.vm.name") == "Da
                 }
             }
         }
+        item { HorizontalDivider(Modifier.padding(horizontal = 24.dp)); SectionTitle("Music sources"); MusicSourcesSettings() }
         item { HorizontalDivider(Modifier.padding(horizontal = 24.dp)); SectionTitle("Playback") }
         item { SettingsChoice("Audio quality", "Applies when loading the next track. Downloads use high quality.", s.audioQuality, listOf("AUTO" to "Automatic", "HIGH" to "High", "LOW" to "Low")) { v -> Stores.settings.update { it.copy(audioQuality = v) } } }
         item { SettingsToggle("Volume normalization", "Reduce volume differences between tracks. Applies when loading the next track.", s.normalizeVolume) { v -> Stores.settings.update { it.copy(normalizeVolume = v) } } }

@@ -131,6 +131,8 @@ data class Settings(
     val dynamicIslandTopOffset: Int = 8,
     val globalHotkeysEnabled: Boolean = false,
     val globalHotkeys: Map<String, String> = defaultGlobalHotkeys,
+    // Not in the backup allowlist: add-on URLs usually carry an access token.
+    val musicAddons: List<com.utaloom.playback.MusicAddon> = emptyList(),
 ) {
     internal fun normalizeLegacyLtServerUrl() =
         if (ltServerUrl.trim() == "wss://metrolist.caliph.dev/ws") copy(ltServerUrl = "wss://utaloom.caliph.dev/ws") else this

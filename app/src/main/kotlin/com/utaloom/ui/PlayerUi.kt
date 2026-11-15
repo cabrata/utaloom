@@ -160,6 +160,8 @@ private fun SeekBar(s: PlayerState, enabled: Boolean, modifier: Modifier = Modif
         Row(Modifier.fillMaxWidth()) {
             Text(formatTime(if (dragging) (dragValue * dur).toLong() else s.positionMs), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.weight(1f))
+            s.addonSource?.let { Text(it, Modifier.weight(2f, fill = false), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, maxLines = 1) }
+            Spacer(Modifier.weight(1f))
             Text(formatTime(s.durationMs), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }

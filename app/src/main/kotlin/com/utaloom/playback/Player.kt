@@ -45,6 +45,8 @@ data class PlayerState(
     val sleepTimerEndsAt: Long? = null,
     val speed: Float = 1f,
     val pitch: Int = 0,
+    /** Add-on label (name and format) when the current track streams from an add-on. */
+    val addonSource: String? = null,
 ) {
     val current: Song? get() = queue.getOrNull(index)
     val hasNext get() = index < queue.lastIndex || repeat == RepeatMode.ALL
@@ -562,9 +564,19 @@ object Player {
 
     private suspend fun startMedia(p: AudioEngine, song: Song, gen: Long) {
         val local = Stores.library.value.downloaded[song.id]?.let(::File)?.takeIf { it.exists() }
+        val addon = if (local == null) runCatching {
+            MusicAddons.resolve(song.id, Stores.settings.value.musicAddons, song.title, song.artists, song.duration)
+        }.getOrElse { if (it is CancellationException) throw it; null } else null
+        currentCoroutineContext().ensureActive()
+        if (!currentLoad(p, song.id, gen)) return
+        _state.update { it.copy(addonSource = addon?.label) }
         val (mrl, headers) = if (local != null) {
             gain = 1.0
             local.absolutePath to emptyMap()
+        } else if (addon != null) {
+            gain = 1.0
+            lastClient = null
+            addon.url to emptyMap()
         } else {
             val quality = runCatching { AudioQuality.valueOf(Stores.settings.value.audioQuality) }.getOrDefault(AudioQuality.AUTO)
             val stream = runCatching { StreamResolver.resolve(song.id, quality, allowBoundedRange = false) }.getOrElse { e ->
@@ -612,6 +624,7 @@ object Player {
     @Synchronized private fun onError(gen: Long) {
         if (gen != generation.get()) return
         val song = _state.value.current ?: return
+        if (_state.value.addonSource != null) MusicAddons.markFailed(song.id)
         lastClient?.let { StreamResolver.markFailed(song.id, it) }
         if (!retried) {
             retried = true
