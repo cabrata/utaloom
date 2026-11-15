@@ -363,8 +363,10 @@ private fun FullscreenButton(fullscreen: Boolean, onClick: () -> Unit) {
 @Composable
 private fun MobileFullPlayer(onClose: () -> Unit, initialPage: PlayerPage, fullscreen: Boolean, onToggleFullscreen: () -> Unit) {
     val s by Player.state.collectAsState()
+    val settings by Stores.settings.state.collectAsState()
     val guest = isGuest()
     var page by rememberSaveable(initialPage) { mutableStateOf(initialPage) }
+    val canvasUrl = rememberCanvasUrl(s.current, settings.spotifyCanvasEnabled && LocalCanvasActive.current && page == PlayerPage.NOW_PLAYING, settings.spotifySpDc)
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -373,6 +375,7 @@ private fun MobileFullPlayer(onClose: () -> Unit, initialPage: PlayerPage, fulls
                     Text("Now playing", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(s.queueTitle ?: "Your queue", style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
+                if (settings.spotifySpDc != null) CanvasToggle(settings.spotifyCanvasEnabled)
                 SleepTimerButton(s, guest)
                 FullscreenButton(fullscreen, onToggleFullscreen)
             }
@@ -389,11 +392,8 @@ private fun MobileFullPlayer(onClose: () -> Unit, initialPage: PlayerPage, fulls
                     PlayerPage.QUEUE -> QueuePanel(compact = true)
                     PlayerPage.NOW_PLAYING -> {
                         Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 8.dp)) {
-                            // Let the artwork give up space before playback controls, including with large fonts.
-                            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().padding(bottom = 12.dp), contentAlignment = Alignment.Center) {
-                                val artSize = minOf(360.dp, maxWidth, maxHeight).coerceAtLeast(1.dp)
-                                Thumb(hiRes(s.current?.thumbnail), artSize, RoundedCornerShape(20.dp), Modifier.semantics { contentDescription = "Now playing artwork" })
-                            }
+                            CanvasArtwork(s.current, canvasUrl, s.isPlaying && !s.isBuffering,
+                                Modifier.weight(1f).fillMaxWidth().padding(bottom = 12.dp))
                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
                                     Text(s.current?.title ?: "Nothing playing", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -421,6 +421,8 @@ private fun MobileFullPlayer(onClose: () -> Unit, initialPage: PlayerPage, fulls
 fun FullPlayer(onClose: () -> Unit, fullscreen: Boolean, onToggleFullscreen: () -> Unit, compact: Boolean = false, initialPage: PlayerPage = PlayerPage.NOW_PLAYING) {
     if (compact) return MobileFullPlayer(onClose, initialPage, fullscreen, onToggleFullscreen)
     val s by Player.state.collectAsState()
+    val settings by Stores.settings.state.collectAsState()
+    val canvasUrl = rememberCanvasUrl(s.current, settings.spotifyCanvasEnabled && LocalCanvasActive.current, settings.spotifySpDc)
     val guest = isGuest()
     var tab by remember { mutableStateOf(0) } // 0 lyrics, 1 queue
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -431,13 +433,14 @@ fun FullPlayer(onClose: () -> Unit, fullscreen: Boolean, onToggleFullscreen: () 
                 IconButton(onClose) { Icon(Icons.Default.ExpandMore, "Close player") }
                 Text(s.queueTitle ?: "Now playing", style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 if (guest) GuestBadge()
+                if (settings.spotifySpDc != null) CanvasToggle(settings.spotifyCanvasEnabled)
                 FullscreenButton(fullscreen, onToggleFullscreen)
             }
             Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(32.dp)) {
                 Column(Modifier.weight(1f).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                     val song = s.current
-                    Thumb(hiRes(song?.thumbnail), 380.dp, RoundedCornerShape(16.dp))
-                    Spacer(Modifier.height(24.dp))
+                    CanvasArtwork(song, canvasUrl, s.isPlaying && !s.isBuffering,
+                        Modifier.weight(1f).fillMaxWidth().padding(bottom = 20.dp))
                     Column(Modifier.widthIn(max = 460.dp).fillMaxWidth()) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {

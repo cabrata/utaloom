@@ -16,6 +16,7 @@ import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -47,8 +48,10 @@ object SpotifyCanvasClient {
             cache[key]?.takeIf { it.second > now }?.let { return@withLock it.first }
             if (now < retryAt) return@withLock null
             try {
-                val access = accessToken(cookie)
-                val canvas = searchTrackId(title, artist, access)?.let { canvasByTrackId(it, access) }
+                val canvas = runInterruptible {
+                    val access = accessToken(cookie)
+                    searchTrackId(title, artist, access)?.let { canvasByTrackId(it, access) }
+                }
                 cache[key] = canvas to (System.currentTimeMillis() + if (canvas == null) 5 * 60_000L else 30 * 60_000L)
                 if (cache.size > 100) cache.remove(cache.keys.first())
                 canvas

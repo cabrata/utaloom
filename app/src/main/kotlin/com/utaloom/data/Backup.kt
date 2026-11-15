@@ -27,7 +27,7 @@ object Backup {
     // Cookie/account/visitorData/dataSyncId, all API keys/secrets/tokens/sessions/usernames,
     // proxy and custom endpoints are intentionally never copied, even on restore.
     private val safePreferences = setOf(
-        "darkMode", "dynamicColor", "audioQuality", "volume", "normalizeVolume", "smartShuffle",
+        "darkMode", "dynamicColor", "audioQuality", "volume", "normalizeVolume", "smartShuffle", "spotifyCanvasEnabled",
         "useLoginForBrowse", "contentLanguage", "contentCountry", "hideExplicit", "pauseHistory", "pauseSearchHistory",
         "ltAutoApproveJoins", "ltAutoApproveSuggestions", "ltSyncVolume", "lyricsOrder", "lyricsDisabled", "lyricsTextSize", "minimizeToTray",
         "equalizerEnabled", "equalizerPreset", "equalizerPreamp", "equalizerBands", "crossfadeSeconds", "gaplessPlayback", "skipSilence",

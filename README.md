@@ -26,6 +26,7 @@ Both platforms compile the same Utaloom UI, library, extraction, lyrics and List
 - Albums, artists, playlists, podcasts, "Listen again"
 - Player with queue, shuffle, repeat, radio (endless autoplay), sleep timer, volume normalization
 - Native full-screen player that hides the window title bar and system taskbar. Use the full-screen button or F11, and Esc to exit
+- Spotify Canvas: muted video loops in the expanded player, with a first-frame fade and cover-art fallback. Sign in under **Settings → Spotify (Canvas)** and enable **Spotify Canvas**. The player also has a Canvas toggle
 - Synced lyrics with word-by-word (karaoke) highlighting. Providers: BetterLyrics, LrcLib, KuGou, Paxsenix, LyricsPlus (off by default), Zemer, YouTube subtitles, YouTube Music. They are tried in order with fallback, and you can reorder or toggle them in Settings → Lyrics providers
 - Offline lyrics romanization for Japanese (Romaji), Korean (Romaja), Chinese (Pinyin), Hindi, Punjabi and the Cyrillic-script languages (Russian, Ukrainian, Serbian, Bulgarian, Belarusian, Kyrgyz, Macedonian), with per-language toggles and an optional "romanization as main line" mode
 - Library: liked songs, history, local playlists, saved albums/artists/playlists

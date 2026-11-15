@@ -56,6 +56,7 @@ val fetchVlc = tasks.register("fetchVlc") {
     val zip = layout.buildDirectory.file("vlc-$vlcVersion-win64.zip")
     val out = vlcBundleRoot.map { it.dir("windows") }
     onlyIf { System.getProperty("os.name").lowercase().contains("win") || project.hasProperty("bundleVlc") }
+    inputs.property("canvasVideoOutput", true)
     outputs.dir(out)
     doLast {
         val z = zip.get().asFile
@@ -65,12 +66,13 @@ val fetchVlc = tasks.register("fetchVlc") {
                 .openStream().use { s -> z.outputStream().use { o -> s.copyTo(o) } }
             check(sha() == vlcSha256) { "VLC zip checksum mismatch" }
         }
-        // Audio only: drop GUI/video/streaming plugins (~half the size).
-        val skip = listOf("gui", "lua", "video_output", "video_filter", "video_splitter", "visualization", "spu", "stream_out", "mux", "access_output", "control", "services_discovery", "text_renderer", "video_chroma", "d3d9", "d3d11")
+        // Canvas uses the memory video output and color converters, without native video windows.
+        val skip = listOf("gui", "lua", "video_filter", "video_splitter", "visualization", "spu", "stream_out", "mux", "access_output", "control", "services_discovery", "text_renderer", "d3d9", "d3d11")
         project.sync {
             from(zipTree(z)) {
                 include("*/libvlc.dll", "*/libvlccore.dll", "*/plugins/**")
                 skip.forEach { exclude("*/plugins/$it/**") }
+                exclude { it.path.contains("/plugins/video_output/") && it.name != "libvmem_plugin.dll" }
                 eachFile { relativePath = RelativePath(true, *relativePath.segments.drop(1).toTypedArray()) }
                 includeEmptyDirs = false
             }

@@ -24,6 +24,7 @@ import com.utaloom.ui.MiniPlayer
 import com.utaloom.ui.DynamicIsland
 import com.utaloom.ui.DefaultSeed
 import com.utaloom.ui.UtaloomTheme
+import com.utaloom.ui.LocalCanvasActive
 import com.utaloom.platform.positionDynamicIsland
 
 fun main() = runApp(exitProcessOnExit = true)
@@ -242,7 +243,9 @@ internal fun runApp(exitProcessOnExit: Boolean) {
                 }
             }
             SideEffect { awtWindow = window }
-            UtaloomApp(vlcError, fullscreen, ::setFullscreen)
+            CompositionLocalProvider(LocalCanvasActive provides (visible && !windowState.isMinimized)) {
+                UtaloomApp(vlcError, fullscreen, ::setFullscreen)
+            }
         }
         if (miniVisible) Window(
             onCloseRequest = DesktopWindows::closeMini,

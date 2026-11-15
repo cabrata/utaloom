@@ -253,8 +253,9 @@ fun SettingsScreen(isMobile: Boolean = System.getProperty("java.vm.name") == "Da
         item { (webStatus ?: webError)?.let { Text(it, Modifier.padding(horizontal = 24.dp), color = if (webStatus != null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) } }
         item {
             SectionTitle("Spotify (Canvas)")
+            SettingsToggle("Spotify Canvas", "Show muted video loops in the expanded player. Songs without Canvas use their cover art.", s.spotifyCanvasEnabled) { v -> Stores.settings.update { it.copy(spotifyCanvasEnabled = v) } }
             Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text(if (s.spotifySpDc == null) "Not signed in. Sign in to look up Spotify Canvas loops." else "Signed in to Spotify.", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(if (s.spotifySpDc == null) "Sign in to Spotify to show Canvas loops." else "Signed in to Spotify.", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (!isMobile && s.spotifySpDc == null) Button({ webLogin {
                     val spDc = WebLogin.run("Sign in to Spotify", "https://accounts.spotify.com/login?continue=https%3A%2F%2Fopen.spotify.com%2F", "https://open.spotify.com/") { jar -> jar["sp_dc"]?.let { extractSpDc("sp_dc=$it") } }
                     if (spDc != null) Stores.settings.update { it.copy(spotifySpDc = spDc) }

@@ -29,6 +29,8 @@ class BackupTest {
         )
         val settings = Settings(
             cookie = "SAPISID=supersecretcookie; HSID=other",
+            spotifySpDc = "spotify-session-secret",
+            spotifyCanvasEnabled = false,
             visitorData = "visitor-secret",
             dataSyncId = "sync-id-123",
             accountName = "Private User",
@@ -47,6 +49,7 @@ class BackupTest {
 
         // Secrets and absolute file paths must NEVER be serialized in backup
         assertFalse(encoded.contains("supersecretcookie"))
+        assertFalse(encoded.contains("spotify-session-secret"))
         assertFalse(encoded.contains("visitor-secret"))
         assertFalse(encoded.contains("sync-id-123"))
         assertFalse(encoded.contains("127.0.0.1"))
@@ -65,6 +68,7 @@ class BackupTest {
         // Safe settings preserved, unsafe excluded
         assertEquals(JsonPrimitive("dark"), decoded.settings["darkMode"])
         assertEquals(JsonPrimitive(75), decoded.settings["volume"])
+        assertEquals(JsonPrimitive(false), decoded.settings["spotifyCanvasEnabled"])
         assertEquals(JsonPrimitive("Japanese:true,Korean:false"), decoded.settings["lyricsRomanizeList"])
         assertEquals(JsonPrimitive(true), decoded.settings["lyricsRomanizeAsMain"])
         assertEquals(JsonPrimitive(true), decoded.settings["lyricsRomanizeCyrillicByLine"])

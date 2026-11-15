@@ -8,6 +8,13 @@ import org.junit.Test
 
 class SettingsTest {
     @Test
+    fun canvasDefaultsOnAndCanBeDisabled() {
+        assertEquals(true, Json.decodeFromString(Settings.serializer(), "{}").spotifyCanvasEnabled)
+        val disabled = Settings(spotifyCanvasEnabled = false)
+        assertEquals(disabled, Json.decodeFromString(Settings.serializer(), Json.encodeToString(Settings.serializer(), disabled)))
+    }
+
+    @Test
     fun romanizeLanguageListDefaultsAndParsing() {
         val supported = Romanization.SUPPORTED_LANGUAGES
 
