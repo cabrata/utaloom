@@ -78,7 +78,39 @@ val fetchVlc = tasks.register("fetchVlc") {
         }
     }
 }
-tasks.matching { it.name == "prepareAppResources" }.configureEach { dependsOn(fetchVlc) }
+// Installers ship Chromium for "Sign in with browser" so the first login never waits on a ~150 MB download.
+// Must match the jcefmaven version: its installation check compares the release tag in build_meta.json.
+val jcefTag = "jcef-17e805a+cef-152.0.6+g708dc14+chromium-152.0.7977.83"
+val jcefSha256 = mapOf(
+    "linux-amd64" to "83f427992cd783fb6f3d499fdf275675187818aa7ca9c4a2a4d43af534a8bdfc",
+    "windows-amd64" to "0dc2ce28766d267f551398e24af7a9bec244b888e651bd97a14ac2d128550875",
+)
+val fetchJcef = tasks.register("fetchJcef") {
+    val host = System.getProperty("os.name").lowercase().let { if ("win" in it) "windows" else if ("linux" in it) "linux" else null }
+    val platform = host?.let { "$it-amd64" }
+    val jar = layout.buildDirectory.file("jcef-natives-$platform.jar")
+    val out = vlcBundleRoot.map { it.dir("$host/jcef") }
+    onlyIf { platform in jcefSha256 && System.getProperty("os.arch") in setOf("amd64", "x86_64") }
+    inputs.property("tag", jcefTag)
+    outputs.dir(out)
+    doLast {
+        val j = jar.get().asFile
+        fun sha() = MessageDigest.getInstance("SHA-256").digest(j.readBytes()).joinToString("") { b -> "%02x".format(b) }
+        if (!j.exists() || sha() != jcefSha256[platform]) {
+            URI("https://repo.maven.apache.org/maven2/me/friwi/jcef-natives-$platform/$jcefTag/jcef-natives-$platform-$jcefTag.jar").toURL()
+                .openStream().use { s -> j.outputStream().use { o -> s.copyTo(o) } }
+            check(sha() == jcefSha256[platform]) { "JCEF natives checksum mismatch" }
+        }
+        val tarGz = zipTree(j).matching { include("*.tar.gz") }.singleFile
+        project.sync {
+            from(tarTree(resources.gzip(tarGz)))
+            into(out)
+        }
+        // jcefmaven treats a directory with build_meta.json and install.lock as installed.
+        out.get().file("install.lock").asFile.writeText("")
+    }
+}
+tasks.matching { it.name == "prepareAppResources" }.configureEach { dependsOn(fetchVlc, fetchJcef) }
 
 // Release version: appVersion in gradle.properties. MSI needs MAJOR.MINOR.BUILD numbers.
 val appVersion = (findProperty("appVersion") as String?)?.removePrefix("v") ?: "1.0.0"

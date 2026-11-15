@@ -140,7 +140,7 @@ fun SettingsScreen(isMobile: Boolean = System.getProperty("java.vm.name") == "Da
             }
             @Composable
             fun AccountActions() {
-                if (!isMobile) Button({ webLogin {
+                if (!isMobile && s.cookie == null) Button({ webLogin {
                     val cookie = WebLogin.run("Sign in to YouTube Music", "https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2Fmusic.youtube.com", "https://music.youtube.com/") { jar ->
                         jar.entries.joinToString("; ") { "${it.key}=${it.value}" }.takeIf { loginCookieError(it) == null }
                     }
@@ -255,10 +255,10 @@ fun SettingsScreen(isMobile: Boolean = System.getProperty("java.vm.name") == "Da
             SectionTitle("Spotify (Canvas)")
             Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 Text(if (s.spotifySpDc == null) "Not signed in. Sign in to look up Spotify Canvas loops." else "Signed in to Spotify.", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (!isMobile) Button({ webLogin {
+                if (!isMobile && s.spotifySpDc == null) Button({ webLogin {
                     val spDc = WebLogin.run("Sign in to Spotify", "https://accounts.spotify.com/login?continue=https%3A%2F%2Fopen.spotify.com%2F", "https://open.spotify.com/") { jar -> jar["sp_dc"]?.let { extractSpDc("sp_dc=$it") } }
                     if (spDc != null) Stores.settings.update { it.copy(spotifySpDc = spDc) }
-                } }) { Text(if (s.spotifySpDc == null) "Sign in" else "Sign in again") }
+                } }) { Text("Sign in") }
                 if (s.spotifySpDc != null) TextButton({ Stores.settings.update { it.copy(spotifySpDc = null) } }) { Text("Sign out") }
             }
         }

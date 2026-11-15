@@ -28,11 +28,36 @@ object WebLogin {
     /** Human-readable setup progress (first-run download, startup), null when idle. */
     val status = MutableStateFlow<String?>(null)
 
-    // The Chromium runtime (~100 MB) is fetched on first use, so it never bloats the installer.
+    // Installers bundle Chromium as app resources; dev runs and other platforms fetch it (~150 MB) on first use.
+    private val bundled = System.getProperty("compose.application.resources.dir")
+        ?.let { java.io.File(it, "jcef") }?.takeIf { it.resolve("install.lock").exists() }
+
+    /**
+     * Where Chromium runs from. Windows uses the bundle in place. deb/rpm/AppImage installs are read-only and
+     * jpackage drops exec bits, so the bundle is copied once (a local copy, no download) into user data.
+     */
+    private fun installDir(dir: java.io.File): java.io.File {
+        val source = bundled ?: return dir
+        if ("win" in System.getProperty("os.name").lowercase()) return source
+        val meta = source.resolve("build_meta.json").readText()
+        if (dir.resolve("install.lock").exists() && dir.resolve("build_meta.json").takeIf { it.exists() }?.readText() == meta) return dir
+        status.value = "Preparing browser…"
+        dir.resolve("install.lock").delete()
+        source.walkTopDown().filter { it.name != "install.lock" }.forEach { f ->
+            val target = dir.resolve(f.relativeTo(source))
+            if (f.isDirectory) target.mkdirs() else f.copyTo(target, overwrite = true)
+        }
+        listOf("jcef_helper", "chrome-sandbox").forEach { dir.resolve(it).setExecutable(true, false) }
+        // Last, so an interrupted copy is redone next time instead of looking installed.
+        dir.resolve("install.lock").createNewFile()
+        return dir
+    }
+
     private val app: CefApp by lazy {
         CefAppBuilder().apply {
+            // Cache and log always live in user data: the install dir may be read-only (e.g. /opt).
             val dir = Paths.dir.resolve("jcef")
-            setInstallDir(dir)
+            setInstallDir(installDir(dir))
             // Chromium builds otherwise open a blank "terms of service" first-run dialog over the login window.
             addJcefArgs("--no-first-run", "--no-default-browser-check")
             // No cache_path: every login starts from a clean, in-memory session.
