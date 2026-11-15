@@ -33,6 +33,8 @@ object WebLogin {
         CefAppBuilder().apply {
             val dir = Paths.dir.resolve("jcef")
             setInstallDir(dir)
+            // Chromium builds otherwise open a blank "terms of service" first-run dialog over the login window.
+            addJcefArgs("--no-first-run", "--no-default-browser-check")
             // No cache_path: every login starts from a clean, in-memory session.
             // Own root dir so CEF never shares or locks the default %LOCALAPPDATA%\CEF profile of other CEF apps.
             cefSettings.root_cache_path = dir.resolve("root").absolutePath
@@ -46,22 +48,40 @@ object WebLogin {
         }.build()
     }
 
-    private fun readCookies(): CookieJar {
-        val jar = HashMap<String, String>()
+    /**
+     * Cookies whose domain covers [url]'s host, so another site's cookie of the same name never leaks in.
+     * visitUrlCookies is not used: in this JCEF it drops httpOnly cookies such as sp_dc and SID.
+     */
+    private fun readCookies(url: String): CookieJar {
+        val host = java.net.URI(url).host
+        val jar = java.util.concurrent.ConcurrentHashMap<String, String>()
         val done = java.util.concurrent.CountDownLatch(1)
         CefCookieManager.getGlobalManager().visitAllCookies(CefCookieVisitor { c, count, total, _ ->
-            jar[c.name] = c.value
+            if (cookieDomainMatches(c.domain, host)) jar[c.name] = c.value
             if (count + 1 >= total) done.countDown()
             true
-        }).also { if (!it) return jar }
-        done.await(3, java.util.concurrent.TimeUnit.SECONDS)
-        return jar
+        }).also { if (!it) return emptyMap() }
+        // No callback at all when the store is empty.
+        return if (done.await(3, java.util.concurrent.TimeUnit.SECONDS)) HashMap(jar) else emptyMap()
     }
 
-    /** Opens [url] in a browser window until [accept] returns a result from the cookies, or the user closes it. */
-    suspend fun <T : Any> run(title: String, url: String, accept: (CookieJar) -> T?): T? = try {
+    internal fun cookieDomainMatches(domain: String, host: String): Boolean {
+        val d = domain.removePrefix(".").lowercase()
+        return host.lowercase().let { it == d || it.endsWith(".$d") }
+    }
+
+    /**
+     * Opens [url] in a browser window until [accept] returns a result from the cookies sent to [cookieUrl],
+     * or the user closes it.
+     */
+    suspend fun <T : Any> run(title: String, url: String, cookieUrl: String, accept: (CookieJar) -> T?): T? = try {
         // createClient runs CefInitialize on first use; off the EDT a slow or stuck start can't freeze the app.
-        val client = withContext(Dispatchers.IO) { app.also { status.value = "Starting browser…" }.createClient() }
+        val client = withContext(Dispatchers.IO) {
+            app.also { status.value = "Starting browser…" }.createClient().also {
+                // The cookie store lives for the whole process: drop the last login so "Sign in again" really asks.
+                CefCookieManager.getGlobalManager().deleteCookies("", "")
+            }
+        }
         suspendCancellableCoroutine { cont ->
             SwingUtilities.invokeLater {
               try {
@@ -88,8 +108,11 @@ object WebLogin {
                 // Windows may open a window started from a background task behind the main window.
                 frame.toFront()
                 status.value = null
+                val polling = java.util.concurrent.atomic.AtomicBoolean()
                 timer = Timer(1500) {
-                    Thread { accept(readCookies())?.let { r -> SwingUtilities.invokeLater { finish(r) } } }.start()
+                    if (polling.compareAndSet(false, true)) Thread {
+                        try { accept(readCookies(cookieUrl))?.let { r -> SwingUtilities.invokeLater { finish(r) } } } finally { polling.set(false) }
+                    }.start()
                 }.also { it.start() }
                 cont.invokeOnCancellation { SwingUtilities.invokeLater { finish(null) } }
               } catch (e: Throwable) {
