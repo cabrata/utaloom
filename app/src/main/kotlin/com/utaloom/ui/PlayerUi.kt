@@ -4,6 +4,7 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.FlowRow
@@ -87,6 +88,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryTabRow
@@ -98,6 +100,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -391,9 +394,11 @@ private fun MobileFullPlayer(onClose: () -> Unit, initialPage: PlayerPage, fulls
                     PlayerPage.LYRICS -> LyricsPanel(compact = true)
                     PlayerPage.QUEUE -> QueuePanel(compact = true)
                     PlayerPage.NOW_PLAYING -> {
-                        Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 8.dp)) {
-                            CanvasArtwork(s.current, canvasUrl, s.isPlaying && !s.isBuffering,
-                                Modifier.weight(1f).fillMaxWidth().padding(bottom = 12.dp))
+                        Column(Modifier.fillMaxSize()) {
+                            // Canvas runs edge to edge and fades into the controls, like the Android player.
+                            CanvasArtwork(s.current, canvasUrl, s.isPlaying && !s.isBuffering, Modifier.weight(1f).fillMaxWidth(),
+                                artPadding = PaddingValues(start = 20.dp, top = 8.dp, end = 20.dp, bottom = 12.dp))
+                            Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 8.dp)) {
                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
                                     Text(s.current?.title ?: "Nothing playing", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -406,6 +411,7 @@ private fun MobileFullPlayer(onClose: () -> Unit, initialPage: PlayerPage, fulls
                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                                 s.current?.let { DownloadButton(it) }
                                 if (guest) GuestBadge() else VolumeControl(s)
+                            }
                             }
                         }
                     }
@@ -425,47 +431,54 @@ fun FullPlayer(onClose: () -> Unit, fullscreen: Boolean, onToggleFullscreen: () 
     val canvasUrl = rememberCanvasUrl(s.current, settings.spotifyCanvasEnabled && LocalCanvasActive.current, settings.spotifySpDc)
     val guest = isGuest()
     var tab by remember { mutableStateOf(0) } // 0 lyrics, 1 queue
+    var canvasShown by remember { mutableStateOf(false) }
+    val backdropAlpha by animateFloatAsState(if (canvasShown) 0f else 0.45f, tween(350), label = "Backdrop")
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         // Apple Music style backdrop: the cover art, heavily blurred, tints the whole view.
-        AsyncImage(hiRes(s.current?.thumbnail, 120), null, Modifier.fillMaxSize().graphicsLayer { alpha = 0.45f; scaleX = 1.3f; scaleY = 1.3f }.blur(90.dp), contentScale = ContentScale.Crop)
-        Column(Modifier.fillMaxSize().padding(24.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClose) { Icon(Icons.Default.ExpandMore, "Close player") }
-                Text(s.queueTitle ?: "Now playing", style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                if (guest) GuestBadge()
-                if (settings.spotifySpDc != null) CanvasToggle(settings.spotifyCanvasEnabled)
-                FullscreenButton(fullscreen, onToggleFullscreen)
+        // A Canvas replaces it so its gradients fade into a solid background, like the Android player.
+        AsyncImage(hiRes(s.current?.thumbnail, 120), null, Modifier.fillMaxSize().graphicsLayer { alpha = backdropAlpha; scaleX = 1.3f; scaleY = 1.3f }.blur(90.dp), contentScale = ContentScale.Crop)
+        Row(Modifier.fillMaxSize()) {
+            Column(Modifier.weight(1f).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally) {
+                val song = s.current
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    CanvasArtwork(song, canvasUrl, s.isPlaying && !s.isBuffering, Modifier.fillMaxSize(),
+                        artPadding = PaddingValues(start = 24.dp, top = 72.dp, end = 24.dp, bottom = 20.dp),
+                        topScrim = true, endFade = true, onShown = { canvasShown = it })
+                    CompositionLocalProvider(LocalContentColor provides if (canvasShown) Color.White else LocalContentColor.current) {
+                        Row(Modifier.fillMaxWidth().padding(start = 24.dp, top = 24.dp, end = 24.dp), verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(onClose) { Icon(Icons.Default.ExpandMore, "Close player") }
+                            Text(s.queueTitle ?: "Now playing", style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+                Column(Modifier.padding(start = 24.dp, end = 24.dp, bottom = 24.dp).widthIn(max = 460.dp).fillMaxWidth()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(song?.title ?: "Nothing playing", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(song?.artistText.orEmpty(), color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        if (song != null) { LikeButton(song); DownloadButton(song) }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    SeekBar(s, enabled = !guest)
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { Transport(s, guest, big = true) }
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        SleepTimerButton(s, guest)
+                        Spacer(Modifier.weight(1f))
+                        VolumeControl(s)
+                    }
+                }
             }
-            Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(32.dp)) {
-                Column(Modifier.weight(1f).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                    val song = s.current
-                    CanvasArtwork(song, canvasUrl, s.isPlaying && !s.isBuffering,
-                        Modifier.weight(1f).fillMaxWidth().padding(bottom = 20.dp))
-                    Column(Modifier.widthIn(max = 460.dp).fillMaxWidth()) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text(song?.title ?: "Nothing playing", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                Text(song?.artistText.orEmpty(), color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
-                            if (song != null) { LikeButton(song); DownloadButton(song) }
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        SeekBar(s, enabled = !guest)
-                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { Transport(s, guest, big = true) }
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            SleepTimerButton(s, guest)
-                            Spacer(Modifier.weight(1f))
-                            VolumeControl(s)
-                        }
-                    }
+            Column(Modifier.weight(1f).fillMaxHeight().padding(start = 32.dp, top = 24.dp, end = 24.dp, bottom = 24.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton({ tab = 0 }) { Text("Lyrics", fontWeight = if (tab == 0) FontWeight.Bold else FontWeight.Normal) }
+                    TextButton({ tab = 1 }) { Text("Up next", fontWeight = if (tab == 1) FontWeight.Bold else FontWeight.Normal) }
+                    Spacer(Modifier.weight(1f))
+                    if (guest) GuestBadge()
+                    if (settings.spotifySpDc != null) CanvasToggle(settings.spotifyCanvasEnabled)
+                    FullscreenButton(fullscreen, onToggleFullscreen)
                 }
-                Column(Modifier.weight(1f).fillMaxHeight()) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton({ tab = 0 }) { Text("Lyrics", fontWeight = if (tab == 0) FontWeight.Bold else FontWeight.Normal) }
-                        TextButton({ tab = 1 }) { Text("Up next", fontWeight = if (tab == 1) FontWeight.Bold else FontWeight.Normal) }
-                    }
-                    if (tab == 0) LyricsPanel() else QueuePanel()
-                }
+                if (tab == 0) LyricsPanel() else QueuePanel()
             }
         }
     }

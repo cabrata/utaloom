@@ -39,7 +39,7 @@ class CanvasArtworkTest {
         assumeTrue("VLC required", NativeLibs.discoverVlc() == null)
         val song = mutableStateOf(Song("canvas-one", "Canvas test", listOf("Utaloom")))
         val url = mutableStateOf<String?>(CanvasVideoTest.fixture().absolutePath)
-        Scene(480, 640) { CanvasArtwork(song.value, url.value, true, Modifier.fillMaxSize()) }.use { ui ->
+        Scene(480, 640) { CanvasArtwork(song.value, url.value, true, Modifier.fillMaxSize(), topScrim = true, endFade = true) }.use { ui ->
             ui.await("first Canvas frame") { ui.description("Spotify Canvas for Canvas test") != null }
             ui.frame(30)
             ui.capture("canvas-playing")
